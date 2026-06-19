@@ -140,6 +140,42 @@ def send_supabase_post(table_name, payload):
         print(f"[Supabase API Error] POST {table_name} failed: {e}", file=sys.stderr)
         return False
 
+# =====================================================================
+# MODIFIED SECTION: Added send_supabase_patch helper for PATCH/UPDATE
+# =====================================================================
+def send_supabase_patch(table_name, payload, query_params):
+    """Dispatcher for Supabase REST API updates (PATCH)"""
+    if not SUPABASE_URL or not SUPABASE_KEY:
+        return False
+    query_str = "&".join(f"{k}=eq.{v}" for k, v in query_params.items())
+    url = f"{SUPABASE_URL.rstrip('/')}/rest/v1/{table_name}?{query_str}"
+    headers = {
+        "apikey": SUPABASE_KEY,
+        "Authorization": f"Bearer {SUPABASE_KEY}",
+        "Content-Type": "application/json",
+        "Prefer": "return=minimal",
+        "Accept-Profile": "app_dual",
+        "Content-Profile": "app_dual"
+    }
+    body = json.dumps(payload).encode("utf-8")
+    try:
+        req = urllib.request.Request(url, data=body, headers=headers, method="PATCH")
+        with urllib.request.urlopen(req, timeout=5) as response:
+            return response.status in (200, 201, 204)
+    except urllib.error.HTTPError as e:
+        try:
+            error_body = e.read().decode("utf-8", errors="ignore")
+        except Exception:
+            error_body = "(could not read body)"
+        print(f"[Supabase API Error] PATCH {table_name} failed: HTTP {e.code} ({e.reason})\nResponse Body: {error_body}", file=sys.stderr)
+        return False
+    except Exception as e:
+        print(f"[Supabase API Error] PATCH {table_name} failed: {e}", file=sys.stderr)
+        return False
+# =====================================================================
+# MODIFIED SECTION END
+# =====================================================================
+
 # Dispatcher for direct PostgreSQL connection
 def insert_postgres_row(query, params):
     if not DATABASE_URL or not HAS_PG:
@@ -306,17 +342,18 @@ def simulate_step(users):
                 "id", "room_id", "call_type", "started_at", "ended_at", "call_status", "duration_seconds"
             ], call_row_csv)
             
-            # Post updates (Postgres only updates ended call; REST creates new entry reflecting ended state)
-            call_row_api = {
-                "id": ended_call["id"],
-                "room_id": ended_call["room_id"],
-                "call_type": ended_call["type"],
-                "started_at": ended_call["start_time"].strftime("%Y-%m-%d %H:%M:%S"),
+# =====================================================================
+# MODIFIED SECTION: Converted duplicate POST to PATCH update
+# =====================================================================
+            call_update_payload = {
                 "ended_at": ended_at.strftime("%Y-%m-%d %H:%M:%S"),
                 "call_status": "completed",
                 "duration_seconds": dur
             }
-            send_supabase_post("dual_calls", call_row_api)
+            send_supabase_patch("dual_calls", call_update_payload, {"id": ended_call["id"]})
+# =====================================================================
+# MODIFIED SECTION END
+# =====================================================================
             if DATABASE_URL and HAS_PG:
                 insert_postgres_row(
                     "UPDATE app_dual.dual_calls SET ended_at = %s, call_status = 'completed', duration_seconds = %s WHERE id = %s",
