@@ -43,6 +43,14 @@ def disable_rls_if_possible():
                 "app_group.announcements",
                 "app_group.group_playlist_tracks",
                 "app_podcast.podcast_listener_sessions",
+                "app_open.languages",
+                "app_open.badges",
+                "app_open.states",
+                "app_open.user_profiles",
+                "app_open.music_tracks",
+                "app_open.music_channels",
+                "app_open.channel_playlists",
+                "app_open.playlist_tracks",
                 "app_open.music_listener_sessions"
             ]
             for table in tables_to_disable:

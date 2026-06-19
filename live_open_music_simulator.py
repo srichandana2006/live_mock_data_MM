@@ -236,6 +236,37 @@ def send_supabase_patch(table_name, payload, query_params):
         print(f"[Supabase API Error] PATCH {table_name} failed: {e}", file=sys.stderr)
         return False
 
+def send_supabase_upsert(table_name, payload, conflict_target="id"):
+    """Dispatcher for Supabase REST API UPSERT"""
+    if not SUPABASE_URL or not SUPABASE_KEY:
+        return False
+    url = f"{SUPABASE_URL.rstrip('/')}/rest/v1/{table_name}?on_conflict={conflict_target}"
+    headers = {
+        "apikey": SUPABASE_KEY,
+        "Authorization": f"Bearer {SUPABASE_KEY}",
+        "Content-Type": "application/json",
+        "Prefer": "resolution=merge-duplicates,return=minimal",
+        "Accept-Profile": "app_open",
+        "Content-Profile": "app_open"
+    }
+    body = json.dumps(payload).encode("utf-8")
+    try:
+        req = urllib.request.Request(url, data=body, headers=headers, method="POST")
+        with urllib.request.urlopen(req, timeout=5) as response:
+            return response.status in (200, 201, 204)
+    except urllib.error.HTTPError as e:
+        if e.code in (401, 409):
+            return True
+        try:
+            error_body = e.read().decode("utf-8", errors="ignore")
+        except Exception:
+            error_body = "(could not read body)"
+        print(f"[Supabase API Error] UPSERT {table_name} failed: HTTP {e.code} ({e.reason})\nResponse Body: {error_body}", file=sys.stderr)
+        return False
+    except Exception as e:
+        print(f"[Supabase API Error] UPSERT {table_name} failed: {e}", file=sys.stderr)
+        return False
+
 # Dispatcher for direct PostgreSQL connection
 def insert_postgres_row(query, params):
     if not DATABASE_URL or not HAS_PG:
@@ -263,7 +294,7 @@ def seed_static_tables(users):
             "language_name": lang
         }
         append_to_csv(LANGUAGES_CSV_PATH, ["id", "language_name"], [lang_row["id"], lang_row["language_name"]])
-        send_supabase_post("languages", lang_row)
+        send_supabase_upsert("languages", lang_row)
         if DATABASE_URL and HAS_PG:
             insert_postgres_row(
                 "INSERT INTO app_open.languages (id, language_name) VALUES (%s,%s) ON CONFLICT DO NOTHING",
@@ -282,7 +313,7 @@ def seed_static_tables(users):
         append_to_csv(BADGES_CSV_PATH, ["id", "badge_name", "description", "created_at"], [
             badge_row["id"], badge_row["badge_name"], badge_row["description"], badge_row["created_at"]
         ])
-        send_supabase_post("badges", badge_row)
+        send_supabase_upsert("badges", badge_row)
         if DATABASE_URL and HAS_PG:
             insert_postgres_row(
                 "INSERT INTO app_open.badges (id, badge_name, description, created_at) VALUES (%s,%s,%s,%s) ON CONFLICT DO NOTHING",
@@ -297,7 +328,7 @@ def seed_static_tables(users):
             "state_name": state
         }
         append_to_csv(STATES_CSV_PATH, ["id", "state_name"], [state_row["id"], state_row["state_name"]])
-        send_supabase_post("states", state_row)
+        send_supabase_upsert("states", state_row)
         if DATABASE_URL and HAS_PG:
             insert_postgres_row(
                 "INSERT INTO app_open.states (id, state_name) VALUES (%s,%s) ON CONFLICT DO NOTHING",
@@ -330,7 +361,7 @@ def seed_static_tables(users):
             profile_row["id"], profile_row["user_id"], profile_row["username"], profile_row["display_name"], profile_row["email"],
             profile_row["language"], profile_row["state"], profile_row["country"], profile_row["profile_image_url"], profile_row["bio"], profile_row["followers_count"]
         ])
-        send_supabase_post("user_profiles", profile_row)
+        send_supabase_upsert("user_profiles", profile_row)
         if DATABASE_URL and HAS_PG:
             insert_postgres_row(
                 "INSERT INTO app_open.user_profiles (id, user_id, username, display_name, email, language, state, country, profile_image_url, bio, followers_count) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) ON CONFLICT DO NOTHING",
@@ -373,7 +404,7 @@ def seed_initial_music_catalogs():
             track_row["id"], track_row["track_code"], track_row["title"], track_row["artist"], track_row["album"], track_row["language"], track_row["genre"],
             track_row["duration_seconds"], track_row["release_year"], track_row["file_url"], track_row["cover_image_url"], track_row["play_count"], track_row["likes_count"], track_row["created_at"]
         ])
-        send_supabase_post("music_tracks", track_row)
+        send_supabase_upsert("music_tracks", track_row)
         if DATABASE_URL and HAS_PG:
             insert_postgres_row(
                 "INSERT INTO app_open.music_tracks (id, track_code, title, artist, album, language, genre, duration_seconds, release_year, file_url, cover_image_url, play_count, likes_count, created_at) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) ON CONFLICT DO NOTHING",
@@ -415,7 +446,7 @@ def seed_initial_music_catalogs():
             channel_row["id"], channel_row["channel_code"], channel_row["channel_name"], channel_row["language"], channel_row["genre"], channel_row["description"],
             channel_row["logo_url"], channel_row["is_active"], channel_row["current_listeners"], channel_row["followers_count"], channel_row["created_at"]
         ])
-        send_supabase_post("music_channels", channel_row)
+        send_supabase_upsert("music_channels", channel_row)
         if DATABASE_URL and HAS_PG:
             insert_postgres_row(
                 "INSERT INTO app_open.music_channels (id, channel_code, channel_name, language, genre, description, logo_url, is_active, current_listeners, followers_count, created_at) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) ON CONFLICT DO NOTHING",
@@ -444,7 +475,7 @@ def seed_initial_music_catalogs():
         ], [
             playlist_row["id"], playlist_row["channel_id"], playlist_row["playlist_name"], playlist_row["description"], playlist_row["is_active"], playlist_row["created_at"]
         ])
-        send_supabase_post("channel_playlists", playlist_row)
+        send_supabase_upsert("channel_playlists", playlist_row)
         if DATABASE_URL and HAS_PG:
             insert_postgres_row(
                 "INSERT INTO app_open.channel_playlists (id, channel_id, playlist_name, description, is_active, created_at) VALUES (%s,%s,%s,%s,%s,%s) ON CONFLICT DO NOTHING",
@@ -470,7 +501,7 @@ def seed_initial_music_catalogs():
             append_to_csv(PLAYLIST_TRACKS_CSV_PATH, ["id", "playlist_id", "track_id", "position", "added_at"], [
                 pt_row["id"], pt_row["playlist_id"], pt_row["track_id"], pt_row["position"], pt_row["added_at"]
             ])
-            send_supabase_post("playlist_tracks", pt_row)
+            send_supabase_upsert("playlist_tracks", pt_row)
             if DATABASE_URL and HAS_PG:
                 insert_postgres_row(
                     "INSERT INTO app_open.playlist_tracks (id, playlist_id, track_id, position, added_at) VALUES (%s,%s,%s,%s,%s) ON CONFLICT DO NOTHING",
