@@ -1,0 +1,23 @@
+# Ignore all files in the directory by default
+*
+
+# Allow the specific files needed for Railway deployment
+!Procfile
+!requirements.txt
+!run_all_simulators.py
+!live_auth_simulator.py
+!live_dual_simulator.py
+!live_podcast_simulator.py
+!users_mock_data.csv
+!.gitignore
+
+# Standard python files to ignore
+**/__pycache__/
+**/*.pyc
+**/*.pyo
+**/*.pyd
+
+# Ignore local environment config overrides
+.env
+.env.*
+*.log
