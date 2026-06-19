@@ -18,6 +18,7 @@ if sys.platform.startswith('win'):
 WORKSPACE_DIR = os.environ.get("WORKSPACE_DIR", os.path.dirname(os.path.abspath(__file__)))
 USERS_CSV_PATH = os.path.join(WORKSPACE_DIR, "users_mock_data.csv")
 
+# 17 CSV Paths
 LANGUAGES_CSV_PATH = os.path.join(WORKSPACE_DIR, "languages_mock_data.csv")
 BADGES_CSV_PATH = os.path.join(WORKSPACE_DIR, "badges_mock_data.csv")
 TRACKS_CSV_PATH = os.path.join(WORKSPACE_DIR, "music_tracks_mock_data.csv")
@@ -28,6 +29,13 @@ HISTORY_CSV_PATH = os.path.join(WORKSPACE_DIR, "listening_history_mock_data.csv"
 EVENTS_CSV_PATH = os.path.join(WORKSPACE_DIR, "music_events_mock_data.csv")
 FAVORITES_CSV_PATH = os.path.join(WORKSPACE_DIR, "music_favorites_mock_data.csv")
 SESSIONS_CSV_PATH = os.path.join(WORKSPACE_DIR, "music_listener_sessions_mock_data.csv")
+NOTIFICATIONS_CSV_PATH = os.path.join(WORKSPACE_DIR, "notifications_mock_data.csv")
+PLAYLIST_TRACKS_CSV_PATH = os.path.join(WORKSPACE_DIR, "playlist_tracks_mock_data.csv")
+STATES_CSV_PATH = os.path.join(WORKSPACE_DIR, "states_mock_data.csv")
+USER_ACTIVITY_CSV_PATH = os.path.join(WORKSPACE_DIR, "user_activity_mock_data.csv")
+USER_BADGES_CSV_PATH = os.path.join(WORKSPACE_DIR, "user_badges_mock_data.csv")
+USER_FOLLOWING_CSV_PATH = os.path.join(WORKSPACE_DIR, "user_following_mock_data.csv")
+USER_PROFILES_CSV_PATH = os.path.join(WORKSPACE_DIR, "user_profiles_mock_data.csv")
 
 try:
     import psycopg2
@@ -59,6 +67,9 @@ badges_pool = [
     ("Song Collector", "Mark at least 10 different tracks as favorites."),
     ("Night Owl", "Listen to music channels between 12 AM and 4 AM.")
 ]
+
+states_list = ["California", "Texas", "New York", "Florida", "Illinois", "Telangana", "Maharashtra", "Karnataka", "Tamil Nadu", "Delhi"]
+countries_list = ["USA", "India", "UK", "Canada", "Germany"]
 
 channel_genres = ["Lo-Fi", "Bollywood Hits", "Techno", "Hip Hop", "Acoustic", "Jazz", "Classical", "K-Pop", "Devotional"]
 
@@ -94,13 +105,23 @@ def load_user_pool():
                 reader = csv.DictReader(f)
                 for row in reader:
                     if row.get("id"):
-                        users.append(row["id"])
+                        users.append({
+                            "id": row["id"],
+                            "user_name": row.get("user_name", "Anonymous"),
+                            "email": row.get("email", "user@example.com")
+                        })
         except Exception as e:
             print(f"Warning: Could not parse users CSV: {e}", file=sys.stderr)
             
     if not users:
         print("[Warning] No user pool loaded from users_mock_data.csv. Generating local mock user list.")
-        users = [str(uuid.uuid4()) for _ in range(100)]
+        for _ in range(100):
+            uid_str = str(uuid.uuid4())
+            users.append({
+                "id": uid_str,
+                "user_name": f"User_{uid_str[:8]}",
+                "email": f"user_{uid_str[:8]}@example.com"
+            })
     return users
 
 # Helper to write rows to local CSV files
@@ -132,7 +153,7 @@ def send_supabase_post(table_name, payload):
             return response.status in (200, 201)
     except urllib.error.HTTPError as e:
         # 409 conflict can happen when seeding unique config values
-        if e.code == 409 and table_name in ("languages", "badges"):
+        if e.code == 409 and table_name in ("languages", "badges", "states", "user_profiles"):
             return True
         try:
             error_body = e.read().decode("utf-8", errors="ignore")
@@ -159,8 +180,8 @@ def insert_postgres_row(query, params):
         print(f"[PostgreSQL Error] query failed: {e}", file=sys.stderr)
         return False
 
-def seed_static_tables():
-    print("Checking static languages and badges data...")
+def seed_static_tables(users):
+    print("Checking static languages, badges, states and profiles...")
     now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
     # 1. Seed Languages
@@ -196,7 +217,55 @@ def seed_static_tables():
                 "INSERT INTO app_open.badges (id, badge_name, description, created_at) VALUES (%s,%s,%s,%s) ON CONFLICT DO NOTHING",
                 (badge_id, b_name, b_desc, datetime.datetime.now())
             )
-    print("Static configurations verified.")
+
+    # 3. Seed States
+    for state in states_list:
+        state_id = str(uuid.uuid5(uuid.NAMESPACE_DNS, f"state-{state}"))
+        state_row = {
+            "id": state_id,
+            "state_name": state
+        }
+        append_to_csv(STATES_CSV_PATH, ["id", "state_name"], [state_row["id"], state_row["state_name"]])
+        send_supabase_post("states", state_row)
+        if DATABASE_URL and HAS_PG:
+            insert_postgres_row(
+                "INSERT INTO app_open.states (id, state_name) VALUES (%s,%s) ON CONFLICT DO NOTHING",
+                (state_id, state)
+            )
+
+    # 4. Seed User Profiles (Limit to first 50 users to avoid initial load overhead)
+    for u in users[:50]:
+        profile_id = str(uuid.uuid5(uuid.NAMESPACE_DNS, f"profile-{u['id']}"))
+        username = u["user_name"].lower().replace(" ", "_")
+        state_val = random.choice(states_list)
+        country_val = random.choice(countries_list)
+        
+        profile_row = {
+            "id": profile_id,
+            "user_id": u["id"],
+            "username": username,
+            "display_name": u["user_name"],
+            "email": u["email"],
+            "language": random.choice(languages_list),
+            "state": state_val,
+            "country": country_val,
+            "profile_image_url": f"https://example.com/avatar/{username}.png",
+            "bio": f"Music lover from {state_val}.",
+            "followers_count": random.randint(0, 100)
+        }
+        append_to_csv(USER_PROFILES_CSV_PATH, [
+            "id", "user_id", "username", "display_name", "email", "language", "state", "country", "profile_image_url", "bio", "followers_count"
+        ], [
+            profile_row["id"], profile_row["user_id"], profile_row["username"], profile_row["display_name"], profile_row["email"],
+            profile_row["language"], profile_row["state"], profile_row["country"], profile_row["profile_image_url"], profile_row["bio"], profile_row["followers_count"]
+        ])
+        send_supabase_post("user_profiles", profile_row)
+        if DATABASE_URL and HAS_PG:
+            insert_postgres_row(
+                "INSERT INTO app_open.user_profiles (id, user_id, username, display_name, email, language, state, country, profile_image_url, bio, followers_count) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) ON CONFLICT DO NOTHING",
+                (profile_id, u["id"], username, u["user_name"], u["email"], profile_row["language"], state_val, country_val, profile_row["profile_image_url"], profile_row["bio"], profile_row["followers_count"])
+            )
+    print("Static configurations and profiles verified.")
 
 def seed_initial_music_catalogs():
     print("Checking initial tracks and channels pool...")
@@ -315,7 +384,50 @@ def seed_initial_music_catalogs():
             "channel_id": channel_id,
             "name": playlist_row["playlist_name"]
         })
-    print("Channels and Playlists initialized.")
+
+        # Seed playlist tracks maps (3 tracks per playlist)
+        selected_tracks = random.sample(active_tracks, 3)
+        for pos, trk in enumerate(selected_tracks, start=1):
+            pt_id = str(uuid.uuid5(uuid.NAMESPACE_DNS, f"playlist-track-{playlist_id}-{trk['id']}"))
+            pt_row = {
+                "id": pt_id,
+                "playlist_id": playlist_id,
+                "track_id": trk["id"],
+                "position": pos,
+                "added_at": now_str
+            }
+            append_to_csv(PLAYLIST_TRACKS_CSV_PATH, ["id", "playlist_id", "track_id", "position", "added_at"], [
+                pt_row["id"], pt_row["playlist_id"], pt_row["track_id"], pt_row["position"], pt_row["added_at"]
+            ])
+            send_supabase_post("playlist_tracks", pt_row)
+            if DATABASE_URL and HAS_PG:
+                insert_postgres_row(
+                    "INSERT INTO app_open.playlist_tracks (id, playlist_id, track_id, position, added_at) VALUES (%s,%s,%s,%s,%s) ON CONFLICT DO NOTHING",
+                    (pt_id, playlist_id, trk["id"], pos, now_dt)
+                )
+
+    print("Channels, Playlists and Playlist Tracks maps initialized.")
+
+def log_user_activity(user_id, activity_type, source_module, entity_id, now_str, now_dt):
+    """Write user activities to the central audit log table"""
+    act_id = str(uuid.uuid4())
+    act_row = {
+        "id": act_id,
+        "user_id": user_id,
+        "activity_type": activity_type,
+        "source_module": source_module,
+        "entity_id": entity_id,
+        "activity_time": now_str
+    }
+    append_to_csv(USER_ACTIVITY_CSV_PATH, ["id", "user_id", "activity_type", "source_module", "entity_id", "activity_time"], [
+        act_row["id"], act_row["user_id"], act_row["activity_type"], act_row["source_module"], act_row["entity_id"], act_row["activity_time"]
+    ])
+    send_supabase_post("user_activity", act_row)
+    if DATABASE_URL and HAS_PG:
+        insert_postgres_row(
+            "INSERT INTO app_open.user_activity (id, user_id, activity_type, source_module, entity_id, activity_time) VALUES (%s,%s,%s,%s,%s,%s)",
+            (act_id, user_id, activity_type, source_module, entity_id, now_dt)
+        )
 
 def simulate_step(users):
     now_dt = datetime.datetime.now()
@@ -325,9 +437,11 @@ def simulate_step(users):
     if not active_channels or not active_tracks:
         return actions
 
-    # Choose random channel and track for simulation actions
+    # Choose random channel, track, and user for simulation actions
     channel = random.choice(active_channels)
     track = random.choice(active_tracks)
+    user_dict = random.choice(users)
+    user_id = user_dict["id"]
 
     # 1. Action: Current Playing updates (30% chance)
     if random.random() < 0.30:
@@ -352,8 +466,6 @@ def simulate_step(users):
     # 2. Action: Listening History log (35% chance)
     if random.random() < 0.35:
         history_id = str(uuid.uuid4())
-        user_id = random.choice(users)
-        
         hist_row = {
             "id": history_id,
             "user_id": user_id,
@@ -370,12 +482,12 @@ def simulate_step(users):
                 "INSERT INTO app_open.listening_history (id, user_id, channel_id, track_id, listened_at) VALUES (%s,%s,%s,%s,%s)",
                 (history_id, user_id, channel["id"], track["id"], now_dt)
             )
+        log_user_activity(user_id, "listen_track", "music", track["id"], now_str, now_dt)
         actions.append(f"LISTENING LOG: User {user_id[:8]}... listened to '{track['title']}' on '{channel['name']}'")
 
     # 3. Action: Music Events (skip/like/play interactions) (30% chance)
     if random.random() < 0.30:
         event_id = str(uuid.uuid4())
-        user_id = random.choice(users)
         event_type = random.choice(["play", "pause", "skip", "like", "share"])
         
         event_row = {
@@ -411,13 +523,13 @@ def simulate_step(users):
                     "UPDATE app_open.music_tracks SET play_count = play_count + 1 WHERE id = %s",
                     (track["id"],)
                 )
+        
+        log_user_activity(user_id, f"trigger_{event_type}", "music", track["id"], now_str, now_dt)
         actions.append(f"INTERACTION EVENT: User {user_id[:8]}... triggered event '{event_type}' on track '{track['title']}'")
 
     # 4. Action: Favorite Music Channel (15% chance)
     if random.random() < 0.15:
         fav_id = str(uuid.uuid4())
-        user_id = random.choice(users)
-        
         fav_row = {
             "id": fav_id,
             "user_id": user_id,
@@ -433,10 +545,10 @@ def simulate_step(users):
                 "INSERT INTO app_open.music_favorites (id, user_id, channel_id, created_at) VALUES (%s,%s,%s,%s)",
                 (fav_id, user_id, channel["id"], now_dt)
             )
+        log_user_activity(user_id, "favorite_channel", "music", channel["id"], now_str, now_dt)
         actions.append(f"FAVORITED STATION: User {user_id[:8]}... favorited Station '{channel['name']}'")
 
     # 5. Action: Music Listener Sessions (30% chance)
-    # End existing session or start new one
     if active_sessions and random.random() < 0.50:
         ended_session = active_sessions.pop(0)
         left_at_str = now_str
@@ -461,11 +573,10 @@ def simulate_step(users):
                 "UPDATE app_open.music_channels SET current_listeners = GREATEST(0, current_listeners - 1) WHERE id = %s",
                 (ended_session["channel_id"],)
             )
+        log_user_activity(ended_session["user_id"], "leave_session", "music", ended_session["channel_id"], now_str, now_dt)
         actions.append(f"LISTENER LEFT: User {ended_session['user_id'][:8]}... left session on channel {ended_session['channel_id'][:8]}...")
     elif random.random() < 0.30:
         session_id = str(uuid.uuid4())
-        user_id = random.choice(users)
-        
         session_row = {
             "id": session_id,
             "channel_id": channel["id"],
@@ -493,7 +604,101 @@ def simulate_step(users):
             "user_id": user_id,
             "joined_at": now_str
         })
+        log_user_activity(user_id, "join_session", "music", channel["id"], now_str, now_dt)
         actions.append(f"LISTENER JOINED: User {user_id[:8]}... joined Station '{channel['name']}'")
+
+    # 6. Action: Notifications (30% chance)
+    if random.random() < 0.30:
+        notif_id = str(uuid.uuid4())
+        target_user = random.choice(users)["id"]
+        notif_type = random.choice(['system', 'music', 'social', 'badge'])
+        titles = {
+            'system': "System Maintenance",
+            'music': "New Track Release!",
+            'social': "New Follower Alert",
+            'badge': "Badge Earned!"
+        }
+        messages = {
+            'system': "MelodyMeet scheduled updates will roll out tonight at 2 AM UTC.",
+            'music': f"Check out the fresh track '{track['title']}' on the station!",
+            'social': "Another user has started following your profile. Say hi!",
+            'badge': "Splendid! You have earned a new badge. Check your achievements section."
+        }
+        
+        notif_row = {
+            "id": notif_id,
+            "user_id": target_user,
+            "notification_type": notif_type,
+            "title": titles[notif_type],
+            "message": messages[notif_type],
+            "is_read": False,
+            "created_at": now_str
+        }
+        append_to_csv(NOTIFICATIONS_CSV_PATH, ["id", "user_id", "notification_type", "title", "message", "is_read", "created_at"], [
+            notif_row["id"], notif_row["user_id"], notif_row["notification_type"], notif_row["title"], notif_row["message"], notif_row["is_read"], notif_row["created_at"]
+        ])
+        send_supabase_post("notifications", notif_row)
+        if DATABASE_URL and HAS_PG:
+            insert_postgres_row(
+                "INSERT INTO app_open.notifications (id, user_id, notification_type, title, message, is_read, created_at) VALUES (%s,%s,%s,%s,%s,%s,%s)",
+                (notif_id, target_user, notif_type, titles[notif_type], messages[notif_type], False, now_dt)
+            )
+        actions.append(f"NOTIFICATION: Sent '{notif_type}' alert to User {target_user[:8]}...")
+
+    # 7. Action: User Badges Awarded (15% chance)
+    if random.random() < 0.15:
+        ub_id = str(uuid.uuid4())
+        target_user = random.choice(users)["id"]
+        b_name = random.choice(badges_pool)[0]
+        badge_id = str(uuid.uuid5(uuid.NAMESPACE_DNS, f"badge-{b_name}"))
+        
+        ub_row = {
+            "id": ub_id,
+            "user_id": target_user,
+            "badge_id": badge_id,
+            "earned_at": now_str
+        }
+        append_to_csv(USER_BADGES_CSV_PATH, ["id", "user_id", "badge_id", "earned_at"], [
+            ub_row["id"], ub_row["user_id"], ub_row["badge_id"], ub_row["earned_at"]
+        ])
+        send_supabase_post("user_badges", ub_row)
+        if DATABASE_URL and HAS_PG:
+            insert_postgres_row(
+                "INSERT INTO app_open.user_badges (id, user_id, badge_id, earned_at) VALUES (%s,%s,%s,%s)",
+                (ub_id, target_user, badge_id, now_dt)
+            )
+        log_user_activity(target_user, "badge_earned", "badge", badge_id, now_str, now_dt)
+        actions.append(f"BADGE EARNED: User {target_user[:8]}... earned badge '{b_name}'")
+
+    # 8. Action: User Follows (20% chance)
+    if random.random() < 0.20:
+        uf_id = str(uuid.uuid4())
+        u1 = random.choice(users)["id"]
+        u2 = random.choice(users)["id"]
+        if u1 != u2:
+            uf_row = {
+                "id": uf_id,
+                "follower_user_id": u1,
+                "following_user_id": u2,
+                "followed_at": now_str
+            }
+            append_to_csv(USER_FOLLOWING_CSV_PATH, ["id", "follower_user_id", "following_user_id", "followed_at"], [
+                uf_row["id"], uf_row["follower_user_id"], uf_row["following_user_id"], uf_row["followed_at"]
+            ])
+            send_supabase_post("user_following", uf_row)
+            if DATABASE_URL and HAS_PG:
+                insert_postgres_row(
+                    "INSERT INTO app_open.user_following (id, follower_user_id, following_user_id, followed_at) VALUES (%s,%s,%s,%s)",
+                    (uf_id, u1, u2, now_dt)
+                )
+                # Increment follower count in user_profiles
+                profile_u2_id = str(uuid.uuid5(uuid.NAMESPACE_DNS, f"profile-{u2}"))
+                insert_postgres_row(
+                    "UPDATE app_open.user_profiles SET followers_count = followers_count + 1 WHERE id = %s",
+                    (profile_u2_id,)
+                )
+            log_user_activity(u1, "follow_user", "social", u2, now_str, now_dt)
+            actions.append(f"SOCIAL FOLLOW: User {u1[:8]}... started following User {u2[:8]}...")
 
     return actions
 
@@ -514,7 +719,7 @@ def main():
     users = load_user_pool()
     
     # Pre-seed metadata and config tables
-    seed_static_tables()
+    seed_static_tables(users)
     seed_initial_music_catalogs()
     
     if DATABASE_URL:
