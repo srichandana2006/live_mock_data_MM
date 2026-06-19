@@ -5,11 +5,19 @@ import threading
 import signal
 import time
 
+# Ensure UTF-8 output on Windows terminal to prevent UnicodeEncodeError with emojis
+if sys.platform.startswith('win'):
+    import io
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8')
+
 # List of simulator scripts to run
 SIMULATORS = [
     ("AUTH", "live_auth_simulator.py"),
     ("DUAL", "live_dual_simulator.py"),
-    ("PODCAST", "live_podcast_simulator.py")
+    ("PODCAST", "live_podcast_simulator.py"),
+    ("GROUPS", "live_groups_simulator.py"),
+    ("TRACKS", "live_tracks_simulator.py")
 ]
 
 # Track processes to allow clean shutdown

@@ -8,6 +8,8 @@
 !live_auth_simulator.py
 !live_dual_simulator.py
 !live_podcast_simulator.py
+!live_groups_simulator.py
+!live_tracks_simulator.py
 !users_mock_data.csv
 !.gitignore
 
