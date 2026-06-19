@@ -15,7 +15,7 @@ if sys.platform.startswith('win'):
     sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8')
 
 # Define paths
-WORKSPACE_DIR = r"c:\Users\shiva\OneDrive\Desktop\Mock Data"
+WORKSPACE_DIR = os.environ.get("WORKSPACE_DIR", os.path.dirname(os.path.abspath(__file__)))
 USERS_CSV_PATH = os.path.join(WORKSPACE_DIR, "users_mock_data.csv")
 
 # CSV File Paths

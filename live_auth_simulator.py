@@ -9,7 +9,7 @@ import urllib.request
 import json
 
 # Define paths
-WORKSPACE_DIR = r"c:\Users\shiva\OneDrive\Desktop\Mock Data"
+WORKSPACE_DIR = os.environ.get("WORKSPACE_DIR", os.path.dirname(os.path.abspath(__file__)))
 USERS_CSV = os.path.join(WORKSPACE_DIR, "users_mock_data.csv")
 DEVICES_CSV = os.path.join(WORKSPACE_DIR, "devices_mock_data.csv")
 INSTALLS_CSV = os.path.join(WORKSPACE_DIR, "app_installations_mock_data.csv")
