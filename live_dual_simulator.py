@@ -36,7 +36,7 @@ TICK_INTERVAL = 5.0
 
 # Database / Supabase Credentials
 SUPABASE_URL = os.environ.get("SUPABASE_URL")
-SUPABASE_KEY = os.environ.get("SUPABASE_ANON_KEY")
+SUPABASE_KEY = os.environ.get("SUPABASE_SERVICE_ROLE_KEY") or os.environ.get("SUPABASE_ANON_KEY")
 DATABASE_URL = os.environ.get("DATABASE_URL")
 
 # Fallback credentials from test script if not in env
@@ -79,8 +79,26 @@ active_rooms = []
 active_calls = []
 
 def load_user_pool():
-    """Load existing users from CSV to maintain proper referential integrity"""
+    """Load existing users from Supabase or CSV to maintain proper referential integrity"""
     users = []
+    if SUPABASE_URL and SUPABASE_KEY:
+        url = f"{SUPABASE_URL.rstrip('/')}/rest/v1/users?select=id"
+        headers = {
+            "apikey": SUPABASE_KEY,
+            "Authorization": f"Bearer {SUPABASE_KEY}",
+            "Accept-Profile": "app_auth"
+        }
+        try:
+            req = urllib.request.Request(url, headers=headers)
+            with urllib.request.urlopen(req, timeout=5) as response:
+                data = json.loads(response.read().decode())
+                users = [u["id"] for u in data]
+                if users:
+                    print(f"Successfully loaded {len(users)} users from Supabase API.")
+                    return users
+        except Exception as e:
+            print(f"Warning: Could not fetch users from Supabase: {e}", file=sys.stderr)
+
     if os.path.exists(USERS_CSV_PATH):
         try:
             with open(USERS_CSV_PATH, "r", newline="", encoding="utf-8") as f:
@@ -92,7 +110,7 @@ def load_user_pool():
             print(f"Warning: Could not parse users CSV: {e}", file=sys.stderr)
             
     if not users:
-        print("[Warning] No user pool loaded from users_mock_data.csv. Generating local mock user list.")
+        print("[Warning] No user pool loaded. Generating local mock user list.")
         users = [str(uuid.uuid4()) for _ in range(500)]
     else:
         print(f"Successfully loaded {len(users)} users for matched operations.")
