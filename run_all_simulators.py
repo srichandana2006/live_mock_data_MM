@@ -17,7 +17,8 @@ SIMULATORS = [
     ("DUAL", "live_dual_simulator.py"),
     ("PODCAST", "live_podcast_simulator.py"),
     ("GROUPS", "live_groups_simulator.py"),
-    ("TRACKS", "live_tracks_simulator.py")
+    ("TRACKS", "live_tracks_simulator.py"),
+    ("OPEN_MUSIC", "live_open_music_simulator.py")
 ]
 
 # Track processes to allow clean shutdown
