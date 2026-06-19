@@ -35,7 +35,7 @@ TICK_INTERVAL = 5.0
 
 # Database / Supabase Credentials
 SUPABASE_URL = os.environ.get("SUPABASE_URL")
-SUPABASE_KEY = os.environ.get("SUPABASE_ANON_KEY")
+SUPABASE_KEY = os.environ.get("SUPABASE_SERVICE_ROLE_KEY") or os.environ.get("SUPABASE_ANON_KEY")
 DATABASE_URL = os.environ.get("DATABASE_URL")
 
 # Fallback credentials if not in env
@@ -192,7 +192,7 @@ def simulate_step(users):
         # groups table payload
         group_row = {
             "id": group_id,
-            "name": name,
+            "group_name": name,
             "description": desc,
             "group_type": group_type,
             "status": status,
@@ -201,15 +201,15 @@ def simulate_step(users):
         }
         
         append_to_csv(GROUPS_CSV_PATH, [
-            "id", "name", "description", "group_type", "status", "created_by", "created_at"
+            "id", "group_name", "description", "group_type", "status", "created_by", "created_at"
         ], [
-            group_row["id"], group_row["name"], group_row["description"], group_row["group_type"],
+            group_row["id"], group_row["group_name"], group_row["description"], group_row["group_type"],
             group_row["status"], group_row["created_by"], group_row["created_at"]
         ])
         send_supabase_post("groups", group_row)
         if DATABASE_URL and HAS_PG:
             insert_postgres_row(
-                "INSERT INTO app_group.groups (id, name, description, group_type, status, created_by, created_at) VALUES (%s,%s,%s,%s,%s,%s,%s)",
+                "INSERT INTO app_group.groups (id, group_name, description, group_type, status, created_by, created_at) VALUES (%s,%s,%s,%s,%s,%s,%s)",
                 (group_id, name, desc, group_type, status, creator_id, now_dt)
             )
             
@@ -325,7 +325,7 @@ def simulate_step(users):
             # Postgres updates existing event; REST API simulates final state creation
             if DATABASE_URL and HAS_PG:
                 insert_postgres_row(
-                    "UPDATE app_group.events SET event_status = %s WHERE id = %s",
+                    "UPDATE app_group.group_events SET event_status = %s WHERE id = %s",
                     (status, ended_event["id"])
                 )
             actions.append(f"EVENT Concluded: Event {ended_event['id'][:8]}... marked as '{status}'")
@@ -333,9 +333,13 @@ def simulate_step(users):
             event_id = str(uuid.uuid4())
             creator_id = random.choice(group["members"])
             
-            e_date = (now_dt + datetime.timedelta(days=random.randint(0, 5))).strftime("%Y-%m-%d")
-            s_time = (now_dt + datetime.timedelta(hours=random.randint(1, 4))).strftime("%H:%M:%S")
-            e_time = (now_dt + datetime.timedelta(hours=random.randint(5, 8))).strftime("%H:%M:%S")
+            event_date_dt = now_dt + datetime.timedelta(days=random.randint(0, 5))
+            start_time_dt = event_date_dt + datetime.timedelta(hours=random.randint(1, 4))
+            end_time_dt = event_date_dt + datetime.timedelta(hours=random.randint(5, 8))
+
+            e_date = event_date_dt.strftime("%Y-%m-%d")
+            s_time = start_time_dt.strftime("%Y-%m-%d %H:%M:%S")
+            e_time = end_time_dt.strftime("%Y-%m-%d %H:%M:%S")
             status = "scheduled"
             attendees = random.randint(1, len(group["members"]) + 5)
             
@@ -356,11 +360,11 @@ def simulate_step(users):
                 event_row["id"], event_row["group_id"], event_row["event_date"], event_row["start_time"],
                 event_row["end_time"], event_row["event_status"], event_row["attendees_count"], event_row["created_by"]
             ])
-            send_supabase_post("events", event_row)
+            send_supabase_post("group_events", event_row)
             if DATABASE_URL and HAS_PG:
                 insert_postgres_row(
-                    "INSERT INTO app_group.events (id, group_id, event_date, start_time, end_time, event_status, attendees_count, created_by) VALUES (%s,%s,%s,%s,%s,%s,%s,%s)",
-                    (event_id, group_id, e_date, s_time, e_time, status, attendees, creator_id)
+                    "INSERT INTO app_group.group_events (id, group_id, event_date, start_time, end_time, event_status, attendees_count, created_by) VALUES (%s,%s,%s,%s,%s,%s,%s,%s)",
+                    (event_id, group_id, e_date, start_time_dt, end_time_dt, status, attendees, creator_id)
                 )
             
             active_events.append({
