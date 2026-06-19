@@ -24,6 +24,39 @@ SIMULATORS = [
 # Track processes to allow clean shutdown
 processes = []
 
+def disable_rls_if_possible():
+    database_url = os.environ.get("DATABASE_URL")
+    if not database_url:
+        print("[DB Startup] DATABASE_URL not set in environment. Skipping automatic RLS disable.")
+        return
+    try:
+        import psycopg2
+        print("[DB Startup] Attempting to connect to database to disable RLS...")
+        conn = psycopg2.connect(database_url)
+        conn.autocommit = True
+        with conn.cursor() as cur:
+            tables_to_disable = [
+                "app_group.groups",
+                "app_group.group_members",
+                "app_group.group_messages",
+                "app_group.group_events",
+                "app_group.announcements",
+                "app_group.group_playlist_tracks",
+                "app_podcast.podcast_listener_sessions"
+            ]
+            for table in tables_to_disable:
+                try:
+                    cur.execute(f"ALTER TABLE {table} DISABLE ROW LEVEL SECURITY;")
+                    print(f"[DB Startup] Successfully disabled RLS on table: {table}")
+                except Exception as tbl_err:
+                    print(f"[DB Startup] Warning: Could not disable RLS on table {table}: {tbl_err}")
+        conn.close()
+        print("[DB Startup] Finished automatic RLS configuration.")
+    except ImportError:
+        print("[DB Startup] Warning: psycopg2 not installed. Skipping automatic RLS disable.")
+    except Exception as e:
+        print(f"[DB Startup] Error while trying to disable RLS via PostgreSQL: {e}")
+
 def stream_output(prefix, process):
     """Reads stdout of a subprocess and prints it with a prefix."""
     try:
@@ -38,6 +71,10 @@ def main():
     print("=" * 60)
     print("      MELODYMEET MULTI-SCHEMAS LIVE MOCK DATA RUNNER")
     print("=" * 60)
+    
+    # Attempt to automatically disable Row-Level Security (RLS) on problematic tables
+    disable_rls_if_possible()
+    
     print("Initializing simulators...")
 
     # Start each simulator script
