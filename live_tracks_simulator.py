@@ -31,7 +31,7 @@ TICK_INTERVAL = 5.0
 
 # Database / Supabase Credentials
 SUPABASE_URL = os.environ.get("SUPABASE_URL")
-SUPABASE_KEY = os.environ.get("SUPABASE_ANON_KEY")
+SUPABASE_KEY = os.environ.get("SUPABASE_SERVICE_ROLE_KEY") or os.environ.get("SUPABASE_ANON_KEY")
 DATABASE_URL = os.environ.get("DATABASE_URL")
 
 # Fallback credentials if not in env
@@ -57,6 +57,24 @@ active_tracks = []  # track lists to simulate active queue status transitions
 def load_groups():
     """Load existing groups to link tracks to, ensuring foreign key integrity"""
     groups = []
+    if SUPABASE_URL and SUPABASE_KEY:
+        url = f"{SUPABASE_URL.rstrip('/')}/rest/v1/groups?select=id"
+        headers = {
+            "apikey": SUPABASE_KEY,
+            "Authorization": f"Bearer {SUPABASE_KEY}",
+            "Accept-Profile": "app_group"
+        }
+        try:
+            req = urllib.request.Request(url, headers=headers)
+            with urllib.request.urlopen(req, timeout=5) as response:
+                data = json.loads(response.read().decode())
+                groups = [g["id"] for g in data]
+                if groups:
+                    print(f"Loaded {len(groups)} groups from Supabase API.")
+                    return groups
+        except Exception as e:
+            print(f"Warning: Could not fetch groups from Supabase: {e}", file=sys.stderr)
+
     if os.path.exists(GROUPS_CSV_PATH):
         try:
             with open(GROUPS_CSV_PATH, "r", newline="", encoding="utf-8") as f:
@@ -75,6 +93,24 @@ def load_groups():
 def load_users():
     """Load existing users to link as added_by"""
     users = []
+    if SUPABASE_URL and SUPABASE_KEY:
+        url = f"{SUPABASE_URL.rstrip('/')}/rest/v1/users?select=id"
+        headers = {
+            "apikey": SUPABASE_KEY,
+            "Authorization": f"Bearer {SUPABASE_KEY}",
+            "Accept-Profile": "app_auth"
+        }
+        try:
+            req = urllib.request.Request(url, headers=headers)
+            with urllib.request.urlopen(req, timeout=5) as response:
+                data = json.loads(response.read().decode())
+                users = [u["id"] for u in data]
+                if users:
+                    print(f"Loaded {len(users)} users from Supabase API.")
+                    return users
+        except Exception as e:
+            print(f"Warning: Could not fetch users from Supabase: {e}", file=sys.stderr)
+
     if os.path.exists(USERS_CSV_PATH):
         try:
             with open(USERS_CSV_PATH, "r", newline="", encoding="utf-8") as f:
