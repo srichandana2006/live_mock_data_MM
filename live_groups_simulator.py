@@ -151,7 +151,7 @@ def append_to_csv(filepath, headers, data):
 # Dispatcher for Supabase REST API
 def send_supabase_post(table_name, payload):
     if not SUPABASE_URL or not SUPABASE_KEY:
-        return False
+        return True
     url = f"{SUPABASE_URL.rstrip('/')}/rest/v1/{table_name}"
     headers = {
         "apikey": SUPABASE_KEY,
@@ -218,50 +218,55 @@ def simulate_step(users):
             "created_at": now_str
         }
         
-        append_to_csv(GROUPS_CSV_PATH, [
-            "id", "group_name", "description", "group_type", "status", "created_by", "created_at"
-        ], [
-            group_row["id"], group_row["group_name"], group_row["description"], group_row["group_type"],
-            group_row["status"], group_row["created_by"], group_row["created_at"]
-        ])
-        send_supabase_post("groups", group_row)
-        if DATABASE_URL and HAS_PG:
-            insert_postgres_row(
-                "INSERT INTO app_group.groups (id, group_name, description, group_type, status, created_by, created_at) VALUES (%s,%s,%s,%s,%s,%s,%s)",
-                (group_id, name, desc, group_type, status, creator_id, now_dt)
-            )
-            
-        # Add creator as Admin member
-        member_id = str(uuid.uuid4())
-        member_row = {
-            "id": member_id,
-            "group_id": group_id,
-            "user_id": creator_id,
-            "role": "admin",
-            "status": "active",
-            "joined_at": now_str,
-            "left_at": None,
-            "time_spent": 0
-        }
-        append_to_csv(MEMBERS_CSV_PATH, [
-            "id", "group_id", "user_id", "role", "status", "joined_at", "left_at", "time_spent"
-        ], [
-            member_row["id"], member_row["group_id"], member_row["user_id"], member_row["role"],
-            member_row["status"], member_row["joined_at"], member_row["left_at"], member_row["time_spent"]
-        ])
-        send_supabase_post("group_members", member_row)
-        if DATABASE_URL and HAS_PG:
-            insert_postgres_row(
-                "INSERT INTO app_group.group_members (id, group_id, user_id, role, status, joined_at, left_at, time_spent) VALUES (%s,%s,%s,%s,%s,%s,%s,%s)",
-                (member_id, group_id, creator_id, "admin", "active", now_dt, None, 0)
-            )
+        # Only proceed to create child records if parent group creation succeeded
+        group_insert_success = send_supabase_post("groups", group_row)
+        if group_insert_success:
+            append_to_csv(GROUPS_CSV_PATH, [
+                "id", "group_name", "description", "group_type", "status", "created_by", "created_at"
+            ], [
+                group_row["id"], group_row["group_name"], group_row["description"], group_row["group_type"],
+                group_row["status"], group_row["created_by"], group_row["created_at"]
+            ])
+            if DATABASE_URL and HAS_PG:
+                insert_postgres_row(
+                    "INSERT INTO app_group.groups (id, group_name, description, group_type, status, created_by, created_at) VALUES (%s,%s,%s,%s,%s,%s,%s)",
+                    (group_id, name, desc, group_type, status, creator_id, now_dt)
+                )
+                
+            # Add creator as Admin member
+            member_id = str(uuid.uuid4())
+            member_row = {
+                "id": member_id,
+                "group_id": group_id,
+                "user_id": creator_id,
+                "role": "admin",
+                "status": "active",
+                "joined_at": now_str,
+                "left_at": None,
+                "time_spent": 0
+            }
+            member_success = send_supabase_post("group_members", member_row)
+            if member_success:
+                append_to_csv(MEMBERS_CSV_PATH, [
+                    "id", "group_id", "user_id", "role", "status", "joined_at", "left_at", "time_spent"
+                ], [
+                    member_row["id"], member_row["group_id"], member_row["user_id"], member_row["role"],
+                    member_row["status"], member_row["joined_at"], member_row["left_at"], member_row["time_spent"]
+                ])
+                if DATABASE_URL and HAS_PG:
+                    insert_postgres_row(
+                        "INSERT INTO app_group.group_members (id, group_id, user_id, role, status, joined_at, left_at, time_spent) VALUES (%s,%s,%s,%s,%s,%s,%s,%s)",
+                        (member_id, group_id, creator_id, "admin", "active", now_dt, None, 0)
+                    )
 
-        active_groups.append({
-            "id": group_id,
-            "creator": creator_id,
-            "members": [creator_id]
-        })
-        actions.append(f"GROUP CREATED: '{name}' by {creator_id[:8]}...")
+            active_groups.append({
+                "id": group_id,
+                "creator": creator_id,
+                "members": [creator_id]
+            })
+            actions.append(f"GROUP CREATED: '{name}' by {creator_id[:8]}...")
+        else:
+            actions.append(f"GROUP CREATION SKIPPED (Supabase insert failed for '{name}')")
 
     # Ensure we have groups for other operations
     if active_groups:
