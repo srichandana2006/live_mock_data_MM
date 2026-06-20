@@ -1,0 +1,4 @@
+id,group_id,event_date,start_time,end_time,event_status,attendees_count,created_by,event_name
+283586c4-e7e2-4c93-8b5b-5a491f14f24c,96e6dcde-9a2c-4074-af8f-7261dea2ee23,2026-06-23,00:32:53,04:32:53,scheduled,4,91f76402-014a-41d8-baee-d588af33b23a,Podcast Discussion Room
+944cf5bb-bb63-498e-bda1-30b9f5b81ef4,97339f2e-5d26-47c9-8ec5-9b1810f0063e,2026-06-23,00:34:45,04:34:45,scheduled,2,f693dd31-b238-427e-89f4-5809c6ab3d47,Artist Fan Meetup
+78e53857-c5e3-4912-9dac-2b0320393082,62d0630f-1127-4a6a-ba5f-795840520837,2026-06-20,02:57:29,04:57:29,scheduled,6,33b36497-ccd9-4d3d-b9ba-c19047c591f2,Friday Music Night
