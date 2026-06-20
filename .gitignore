@@ -12,24 +12,7 @@
 !live_tracks_simulator.py
 !live_open_music_simulator.py
 !users_mock_data.csv
-!music_listener_sessions_mock_data.csv
-!user_sessions_mock_data.csv
-!dual_calls_mock_data.csv
-!dual_participants_mock_data.csv
-!dual_rooms_mock_data.csv
-!dual_song_requests_mock_data.csv
-!announcements_mock_data.csv
-!events_mock_data.csv
-!group_members_mock_data.csv
-!content_reports_mock_data.csv
-!rj_live_shows_mock_data.csv
-!live_podcast_listeners_mock_data.csv
-!live_podcast_sessions_mock_data.csv
-!podcast_listener_sessions_mock_data.csv
-!rj_listener_sessions_mock_data.csv
-!room_participants_mock_data.csv
 !.gitignore
-
 
 # Standard python files to ignore
 **/__pycache__/
