@@ -750,14 +750,17 @@ def main():
                     )
 
                 if status == "Success":
-                    # Create active session
+                    # Create active session with predetermined logout_time
+                    duration_mins = random.randint(5, 480)
+                    logout_dt = now_dt + datetime.timedelta(minutes=duration_mins)
+                    logout_str = logout_dt.strftime("%Y-%m-%d %H:%M:%S")
                     sess_row = {
                         "session_id": str(uuid.uuid4()),
                         "user_id": uid,
                         "session_token": "sess_" + uuid.uuid4().hex[:20],
                         "session_status": "Active",
                         "login_time": now_str,
-                        "logout_time": None
+                        "logout_time": logout_str
                     }
                     append_row_to_csv(SESSIONS_CSV, ["session_id", "user_id", "session_token", "session_status", "login_time", "logout_time"], [
                         sess_row["session_id"], sess_row["user_id"], sess_row["session_token"], sess_row["session_status"], sess_row["login_time"], sess_row["logout_time"]
@@ -766,7 +769,7 @@ def main():
                     if DATABASE_URL and HAS_PG:
                         insert_postgres_row(
                             "INSERT INTO app_auth.user_sessions (session_id, user_id, session_token, session_status, login_time, logout_time) VALUES (%s,%s,%s,%s,%s,%s)",
-                            (sess_row["session_id"], sess_row["user_id"], sess_row["session_token"], sess_row["session_status"], sess_row["login_time"], sess_row["logout_time"])
+                            (sess_row["session_id"], sess_row["user_id"], sess_row["session_token"], sess_row["session_status"], sess_row["login_time"], logout_dt)
                         )
 
                 actions.append(f"LOGIN: User '{user['user_name']}' via {l_method} ({status})")

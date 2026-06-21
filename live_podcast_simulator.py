@@ -393,12 +393,16 @@ def simulate_step(users):
         user_id = random.choice(users)
         list_id = str(uuid.uuid4())
         
+        duration_minutes = random.randint(5, 180)
+        left_at_dt = now_dt + datetime.timedelta(minutes=duration_minutes)
+        left_at_str = left_at_dt.strftime("%Y-%m-%d %H:%M:%S")
+        
         list_row = {
             "id": list_id,
             "session_id": sess["id"],
             "user_id": user_id,
             "joined_at": now_str,
-            "left_at": None
+            "left_at": left_at_str
         }
         append_to_csv(LIVE_LIST_CSV_PATH, list(list_row.keys()), list(list_row.values()))
         send_supabase_post("live_podcast_listeners", list_row)
@@ -550,12 +554,16 @@ def simulate_step(users):
         user_id = random.choice(users)
         part_id = str(uuid.uuid4())
         
+        duration_minutes = random.randint(5, 360)
+        left_at_dt = now_dt + datetime.timedelta(minutes=duration_minutes)
+        left_at_str = left_at_dt.strftime("%Y-%m-%d %H:%M:%S")
+        
         part_row = {
             "id": part_id,
             "room_id": room_id,
             "user_id": user_id,
             "joined_at": now_str,
-            "left_at": None
+            "left_at": left_at_str
         }
         append_to_csv(ROOMS_CSV_PATH, list(part_row.keys()), list(part_row.values()))
         send_supabase_post("room_participants", part_row)
@@ -769,12 +777,16 @@ def simulate_step(users):
         user_id = random.choice(users)
         session_id = str(uuid.uuid4())
         
+        duration_minutes = random.randint(5, 240)
+        left_at_dt = now_dt + datetime.timedelta(minutes=duration_minutes)
+        left_at_str = left_at_dt.strftime("%Y-%m-%d %H:%M:%S")
+        
         session_row = {
             "id": session_id,
             "show_id": show["id"],
             "user_id": user_id,
             "joined_at": now_str,
-            "left_at": None
+            "left_at": left_at_str
         }
         append_to_csv(RJ_LISTENER_SESS_CSV_PATH, list(session_row.keys()), list(session_row.values()))
         send_supabase_post("rj_listener_sessions", session_row)

@@ -125,6 +125,51 @@ def load_users():
         users = [str(uuid.uuid4()) for _ in range(50)]
     return users
 
+def load_group_rooms():
+    """Load existing rooms and map them to their group_id"""
+    group_rooms = {}
+    if SUPABASE_URL and SUPABASE_KEY:
+        url = f"{SUPABASE_URL.rstrip('/')}/rest/v1/rooms?select=id,group_id"
+        headers = {
+            "apikey": SUPABASE_KEY,
+            "Authorization": f"Bearer {SUPABASE_KEY}",
+            "Accept-Profile": "app_group"
+        }
+        try:
+            req = urllib.request.Request(url, headers=headers)
+            with urllib.request.urlopen(req, timeout=5) as response:
+                data = json.loads(response.read().decode())
+                for r in data:
+                    gid = r.get("group_id")
+                    rid = r.get("id")
+                    if gid and rid:
+                        if gid not in group_rooms:
+                            group_rooms[gid] = []
+                        group_rooms[gid].append(rid)
+                if group_rooms:
+                    print(f"Loaded {sum(len(v) for v in group_rooms.values())} rooms from Supabase API.")
+                    return group_rooms
+        except Exception as e:
+            print(f"Warning: Could not fetch rooms from Supabase: {e}", file=sys.stderr)
+
+    ROOMS_CSV_PATH = os.path.join(WORKSPACE_DIR, "rooms_mock_data.csv")
+    if os.path.exists(ROOMS_CSV_PATH):
+        try:
+            with open(ROOMS_CSV_PATH, "r", newline="", encoding="utf-8") as f:
+                reader = csv.DictReader(f)
+                for r in reader:
+                    gid = r.get("group_id")
+                    rid = r.get("id")
+                    if gid and rid:
+                        if gid not in group_rooms:
+                            group_rooms[gid] = []
+                        group_rooms[gid].append(rid)
+        except Exception as e:
+            print(f"Warning: Could not parse rooms CSV: {e}", file=sys.stderr)
+            
+    return group_rooms
+
+
 # Helper to write rows to local CSV files
 def append_to_csv(filepath, headers, data):
     file_exists = os.path.exists(filepath)
@@ -178,7 +223,7 @@ def insert_postgres_row(query, params):
         print(f"[PostgreSQL Error] query failed: {e}", file=sys.stderr)
         return False
 
-def simulate_step(groups, users):
+def simulate_step(groups, users, group_rooms):
     now_dt = datetime.datetime.now()
     now_str = now_dt.strftime("%Y-%m-%d %H:%M:%S")
     actions = []
@@ -219,6 +264,13 @@ def simulate_step(groups, users):
         track_row_id = str(uuid.uuid4())
         status = "queued"
         
+        # Get room_id (never NULL)
+        room_ids = group_rooms.get(group_id, [])
+        if not room_ids:
+            room_id = str(uuid.uuid4()) # Fallback ID
+        else:
+            room_id = random.choice(room_ids)
+
         track_row = {
             "id": track_row_id,
             "group_id": group_id,
@@ -226,20 +278,21 @@ def simulate_step(groups, users):
             "added_by": added_by,
             "play_order": play_order,
             "status": status,
-            "added_at": now_str
+            "added_at": now_str,
+            "room_id": room_id
         }
         
         append_to_csv(TRACKS_CSV_PATH, [
-            "id", "group_id", "track_id", "added_by", "play_order", "status", "added_at"
+            "id", "group_id", "track_id", "added_by", "play_order", "status", "added_at", "room_id"
         ], [
             track_row["id"], track_row["group_id"], track_row["track_id"], track_row["added_by"],
-            track_row["play_order"], track_row["status"], track_row["added_at"]
+            track_row["play_order"], track_row["status"], track_row["added_at"], track_row["room_id"]
         ])
         send_supabase_post("group_playlist_tracks", track_row)
         if DATABASE_URL and HAS_PG:
             insert_postgres_row(
-                "INSERT INTO app_group.group_playlist_tracks (id, group_id, track_id, added_by, play_order, status, added_at) VALUES (%s,%s,%s,%s,%s,%s,%s)",
-                (track_row_id, group_id, track_id, added_by, play_order, status, now_dt)
+                "INSERT INTO app_group.group_playlist_tracks (id, group_id, track_id, added_by, play_order, status, added_at, room_id) VALUES (%s,%s,%s,%s,%s,%s,%s,%s)",
+                (track_row_id, group_id, track_id, added_by, play_order, status, now_dt, room_id)
             )
             
         active_tracks.append({
@@ -248,7 +301,7 @@ def simulate_step(groups, users):
             "track_id": track_id,
             "status": status
         })
-        actions.append(f"TRACK QUEUED: Track {track_id} queued by {added_by[:8]}... in group {group_id[:8]}... (order: {play_order})")
+        actions.append(f"TRACK QUEUED: Track {track_id} queued by {added_by[:8]}... in group {group_id[:8]}... room {room_id[:8]}... (order: {play_order})")
 
     # Limit track pool size
     if len(active_tracks) > 20:
@@ -273,6 +326,7 @@ def main():
     # Pre-load files
     groups = load_groups()
     users = load_users()
+    group_rooms = load_group_rooms()
     
     if DATABASE_URL:
         if HAS_PG:
@@ -298,8 +352,9 @@ def main():
             if tick % 5 == 0:
                 groups = load_groups()
                 users = load_users()
+                group_rooms = load_group_rooms()
                 
-            actions = simulate_step(groups, users)
+            actions = simulate_step(groups, users, group_rooms)
             
             print(f"[{now_str}] Tick #{tick} | Simulated {len(actions)} event actions:")
             for action in actions:

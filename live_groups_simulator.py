@@ -23,6 +23,7 @@ MEMBERS_CSV_PATH = os.path.join(WORKSPACE_DIR, "group_members_mock_data.csv")
 MESSAGES_CSV_PATH = os.path.join(WORKSPACE_DIR, "group_messages_mock_data.csv")
 EVENTS_CSV_PATH = os.path.join(WORKSPACE_DIR, "events_mock_data.csv")
 ANNOUNCEMENTS_CSV_PATH = os.path.join(WORKSPACE_DIR, "announcements_mock_data.csv")
+ROOMS_CSV_PATH = os.path.join(WORKSPACE_DIR, "rooms_mock_data.csv")
 
 try:
     import psycopg2
@@ -163,6 +164,54 @@ def load_user_pool():
         print(f"Loaded {len(users)} users for group simulation.")
     return users
 
+def load_group_pool():
+    """Load existing groups from Supabase or CSV to maintain proper referential integrity"""
+    groups = []
+    if SUPABASE_URL and SUPABASE_KEY:
+        url = f"{SUPABASE_URL.rstrip('/')}/rest/v1/groups?select=id,created_by"
+        headers = {
+            "apikey": SUPABASE_KEY,
+            "Authorization": f"Bearer {SUPABASE_KEY}",
+            "Accept-Profile": "app_group"
+        }
+        try:
+            req = urllib.request.Request(url, headers=headers)
+            with urllib.request.urlopen(req, timeout=5) as response:
+                data = json.loads(response.read().decode())
+                for g in data:
+                    groups.append({
+                        "id": g["id"],
+                        "creator": g.get("created_by") or str(uuid.uuid4()),
+                        "members": [g.get("created_by")] if g.get("created_by") else [],
+                        "rooms": []
+                    })
+                if groups:
+                    print(f"Successfully loaded {len(groups)} groups from Supabase API.")
+                    return groups
+        except Exception as e:
+            print(f"Warning: Could not fetch groups from Supabase: {e}", file=sys.stderr)
+
+    if os.path.exists(GROUPS_CSV_PATH):
+        try:
+            with open(GROUPS_CSV_PATH, "r", newline="", encoding="utf-8") as f:
+                reader = csv.DictReader(f)
+                for row in reader:
+                    if row.get("id"):
+                        creator = row.get("created_by") or str(uuid.uuid4())
+                        groups.append({
+                            "id": row["id"],
+                            "creator": creator,
+                            "members": [creator],
+                            "rooms": []
+                        })
+                if groups:
+                    print(f"Successfully loaded {len(groups)} groups from CSV.")
+                    return groups
+        except Exception as e:
+            print(f"Warning: Could not parse groups CSV: {e}", file=sys.stderr)
+            
+    return groups
+
 # Helper to write rows to local CSV files
 def append_to_csv(filepath, headers, data):
     file_exists = os.path.exists(filepath)
@@ -257,6 +306,11 @@ def simulate_step(users):
                     (group_id, name, desc, group_type, status, creator_id, now_dt)
                 )
                 
+            # Precompute left_at for the creator group member (never NULL)
+            duration_days = random.randint(1, 30)
+            left_dt = now_dt + datetime.timedelta(days=duration_days, hours=random.randint(0, 23))
+            left_str = left_dt.strftime("%Y-%m-%d %H:%M:%S")
+
             # Add creator as Admin member
             member_id = str(uuid.uuid4())
             member_row = {
@@ -266,7 +320,7 @@ def simulate_step(users):
                 "role": "admin",
                 "status": "active",
                 "joined_at": now_str,
-                "left_at": None,
+                "left_at": left_str,
                 "time_spent": 0
             }
             member_success = send_supabase_post("group_members", member_row)
@@ -280,15 +334,52 @@ def simulate_step(users):
                 if DATABASE_URL and HAS_PG:
                     insert_postgres_row(
                         "INSERT INTO app_group.group_members (id, group_id, user_id, role, status, joined_at, left_at, time_spent) VALUES (%s,%s,%s,%s,%s,%s,%s,%s)",
-                        (member_id, group_id, creator_id, "admin", "active", now_dt, None, 0)
+                        (member_id, group_id, creator_id, "admin", "active", now_dt, left_dt, 0)
                     )
+
+            # Create 1-5 rooms for this group
+            room_names_pool = ["Chill Zone", "Music Lovers Hub", "Podcast Lounge", "Late Night Vibes", "Private Jam Room", "Community Room", "Gaming Corner"]
+            num_rooms = random.randint(1, 5)
+            group_rooms = []
+            for _ in range(num_rooms):
+                room_id = str(uuid.uuid4())
+                room_name = random.choice(room_names_pool) + f" #{random.randint(10, 99)}"
+                room_type = random.choice(["public", "private", "friends"])
+                room_status = random.choice(["active", "closed"])
+                room_member_count = random.randint(1, 10)
+                
+                room_row = {
+                    "id": room_id,
+                    "group_id": group_id,
+                    "name": room_name,
+                    "room_type": room_type,
+                    "status": room_status,
+                    "created_by": creator_id,
+                    "created_at": now_str,
+                    "member_count": room_member_count
+                }
+                
+                append_to_csv(ROOMS_CSV_PATH, [
+                    "id", "group_id", "name", "room_type", "status", "created_by", "created_at", "member_count"
+                ], [
+                    room_row["id"], room_row["group_id"], room_row["name"], room_row["room_type"],
+                    room_row["status"], room_row["created_by"], room_row["created_at"], room_row["member_count"]
+                ])
+                send_supabase_post("rooms", room_row)
+                if DATABASE_URL and HAS_PG:
+                    insert_postgres_row(
+                        "INSERT INTO app_group.rooms (id, group_id, name, room_type, status, created_by, created_at, member_count) VALUES (%s,%s,%s,%s,%s,%s,%s,%s)",
+                        (room_id, group_id, room_name, room_type, room_status, creator_id, now_dt, room_member_count)
+                    )
+                group_rooms.append(room_id)
 
             active_groups.append({
                 "id": group_id,
                 "creator": creator_id,
-                "members": [creator_id]
+                "members": [creator_id],
+                "rooms": group_rooms
             })
-            actions.append(f"GROUP CREATED: '{name}' by {creator_id[:8]}...")
+            actions.append(f"GROUP CREATED: '{name}' by {creator_id[:8]}... with {num_rooms} rooms")
         else:
             actions.append(f"GROUP CREATION SKIPPED (Supabase insert failed for '{name}')")
 
@@ -296,6 +387,9 @@ def simulate_step(users):
     if active_groups:
         group = random.choice(active_groups)
         group_id = group["id"]
+        # Ensure rooms exist in group dictionary (fallback in case it wasn't created)
+        if "rooms" not in group or not group["rooms"]:
+            group["rooms"] = [str(uuid.uuid4())]
 
         # 2. Action: Add a Member to a Group (25% chance)
         if random.random() < 0.25:
@@ -306,6 +400,11 @@ def simulate_step(users):
                 role = random.choices(["moderator", "member"], weights=[0.15, 0.85])[0]
                 member_id = str(uuid.uuid4())
                 
+                # Precompute left_at (never NULL)
+                duration_days = random.randint(1, 30)
+                left_dt = now_dt + datetime.timedelta(days=duration_days, hours=random.randint(0, 23))
+                left_str = left_dt.strftime("%Y-%m-%d %H:%M:%S")
+
                 member_row = {
                     "id": member_id,
                     "group_id": group_id,
@@ -313,7 +412,7 @@ def simulate_step(users):
                     "role": role,
                     "status": "active",
                     "joined_at": now_str,
-                    "left_at": None,
+                    "left_at": left_str,
                     "time_spent": random.randint(0, 120)
                 }
                 
@@ -327,7 +426,7 @@ def simulate_step(users):
                 if DATABASE_URL and HAS_PG:
                     insert_postgres_row(
                         "INSERT INTO app_group.group_members (id, group_id, user_id, role, status, joined_at, left_at, time_spent) VALUES (%s,%s,%s,%s,%s,%s,%s,%s)",
-                        (member_id, group_id, user_id, role, "active", now_dt, None, member_row["time_spent"])
+                        (member_id, group_id, user_id, role, "active", now_dt, left_dt, member_row["time_spent"])
                     )
                 
                 group["members"].append(user_id)
@@ -339,6 +438,7 @@ def simulate_step(users):
             msg_text = random.choice(message_templates)
             msg_id = str(uuid.uuid4())
             read_count = random.randint(1, len(group["members"]))
+            room_id = random.choice(group["rooms"])
             
             message_row = {
                 "id": msg_id,
@@ -346,22 +446,23 @@ def simulate_step(users):
                 "user_id": sender_id,
                 "message": msg_text,
                 "read_count": read_count,
-                "sent_at": now_str
+                "sent_at": now_str,
+                "room_id": room_id
             }
             
             append_to_csv(MESSAGES_CSV_PATH, [
-                "id", "group_id", "user_id", "message", "read_count", "sent_at"
+                "id", "group_id", "user_id", "message", "read_count", "sent_at", "room_id"
             ], [
                 message_row["id"], message_row["group_id"], message_row["user_id"], message_row["message"],
-                message_row["read_count"], message_row["sent_at"]
+                message_row["read_count"], message_row["sent_at"], message_row["room_id"]
             ])
             send_supabase_post("group_messages", message_row)
             if DATABASE_URL and HAS_PG:
                 insert_postgres_row(
-                    "INSERT INTO app_group.group_messages (id, group_id, user_id, message, read_count, sent_at) VALUES (%s,%s,%s,%s,%s,%s)",
-                    (msg_id, group_id, sender_id, msg_text, read_count, now_dt)
+                    "INSERT INTO app_group.group_messages (id, group_id, user_id, message, read_count, sent_at, room_id) VALUES (%s,%s,%s,%s,%s,%s,%s)",
+                    (msg_id, group_id, sender_id, msg_text, read_count, now_dt, room_id)
                 )
-            actions.append(f"MESSAGE inside group {group_id[:8]}... by {sender_id[:8]}... ('{msg_text[:15]}')")
+            actions.append(f"MESSAGE inside group {group_id[:8]}... room {room_id[:8]}... by {sender_id[:8]}... ('{msg_text[:15]}')")
 
         # 4. Action: Create/Update Event (15% chance)
         if active_events and random.random() < 0.30:
@@ -390,9 +491,13 @@ def simulate_step(users):
             status = "scheduled"
             attendees = random.randint(1, len(group["members"]) + 5)
             
+            event_names = ["Weekend Music Jam", "Karaoke Night", "Friday Chill Session", "Open Mic Evening", "Community Meetup", "DJ Night", "Podcast Discussion", "Late Night Vibes", "Music Battle", "Gaming Hangout"]
+            e_name = random.choice(event_names)
+
             event_row = {
                 "id": event_id,
                 "group_id": group_id,
+                "event_name": e_name,
                 "event_date": e_date,
                 "start_time": s_time,
                 "end_time": e_time,
@@ -402,16 +507,16 @@ def simulate_step(users):
             }
             
             append_to_csv(EVENTS_CSV_PATH, [
-                "id", "group_id", "event_date", "start_time", "end_time", "event_status", "attendees_count", "created_by"
+                "id", "group_id", "event_name", "event_date", "start_time", "end_time", "event_status", "attendees_count", "created_by"
             ], [
-                event_row["id"], event_row["group_id"], event_row["event_date"], event_row["start_time"],
+                event_row["id"], event_row["group_id"], event_row["event_name"], event_row["event_date"], event_row["start_time"],
                 event_row["end_time"], event_row["event_status"], event_row["attendees_count"], event_row["created_by"]
             ])
             send_supabase_post("group_events", event_row)
             if DATABASE_URL and HAS_PG:
                 insert_postgres_row(
-                    "INSERT INTO app_group.group_events (id, group_id, event_date, start_time, end_time, event_status, attendees_count, created_by) VALUES (%s,%s,%s,%s,%s,%s,%s,%s)",
-                    (event_id, group_id, e_date, start_time_dt, end_time_dt, status, attendees, creator_id)
+                    "INSERT INTO app_group.group_events (id, group_id, event_name, event_date, start_time, end_time, event_status, attendees_count, created_by) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+                    (event_id, group_id, e_name, e_date, start_time_dt, end_time_dt, status, attendees, creator_id)
                 )
             
             active_events.append({
@@ -419,7 +524,7 @@ def simulate_step(users):
                 "group_id": group_id,
                 "status": status
             })
-            actions.append(f"EVENT SCHEDULED: Event in group {group_id[:8]}... on {e_date} starting at {s_time}")
+            actions.append(f"EVENT SCHEDULED: Event '{e_name}' in group {group_id[:8]}... on {e_date}")
 
         # 5. Action: Create Announcements / Summons (20% chance)
         if random.random() < 0.20:
@@ -428,6 +533,7 @@ def simulate_step(users):
             ann_type = random.choice(["summon", "broadcast", "event"])
             title = random.choice(ann_titles_if_needed(ann_type))
             content = random.choice(ann_contents_if_needed(ann_type))
+            room_id = random.choice(group["rooms"])
             
             targets = None
             targets_csv = ""
@@ -446,22 +552,67 @@ def simulate_step(users):
                 "announcement_type": ann_type,
                 "title": title,
                 "content": content,
-                "created_at": now_str
+                "created_at": now_str,
+                "room_id": room_id
             }
             
             append_to_csv(ANNOUNCEMENTS_CSV_PATH, [
-                "id", "group_id", "created_by", "target_user_ids", "announcement_type", "title", "content", "created_at"
+                "id", "group_id", "created_by", "target_user_ids", "announcement_type", "title", "content", "created_at", "room_id"
             ], [
                 ann_row["id"], ann_row["group_id"], ann_row["created_by"], targets_csv, ann_row["announcement_type"],
-                ann_row["title"], ann_row["content"], ann_row["created_at"]
+                ann_row["title"], ann_row["content"], ann_row["created_at"], ann_row["room_id"]
             ])
             send_supabase_post("announcements", ann_row)
             if DATABASE_URL and HAS_PG:
                 insert_postgres_row(
-                    "INSERT INTO app_group.announcements (id, group_id, created_by, target_user_ids, announcement_type, title, content, created_at) VALUES (%s,%s,%s,%s,%s,%s,%s,%s)",
-                    (ann_id, group_id, creator_id, targets, ann_type, title, content, now_dt)
+                    "INSERT INTO app_group.announcements (id, group_id, created_by, target_user_ids, announcement_type, title, content, created_at, room_id) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+                    (ann_id, group_id, creator_id, targets, ann_type, title, content, now_dt, room_id)
                 )
-            actions.append(f"ANNOUNCEMENT: '{title}' ({ann_type}) broadcasted in group {group_id[:8]}...")
+            actions.append(f"ANNOUNCEMENT: '{title}' ({ann_type}) broadcasted in group {group_id[:8]}... room {room_id[:8]}...")
+
+    # 6. Action: Generate a room (100% chance, every tick / 5 seconds)
+    if active_groups:
+        group = random.choice(active_groups)
+        group_id = group["id"]
+        creator_id = group.get("creator") or random.choice(users)
+        
+        room_id = str(uuid.uuid4())
+        room_names_pool = ["Chill Zone", "Music Lovers Hub", "Podcast Lounge", "Late Night Vibes", "Private Jam Room", "Community Room", "Gaming Corner"]
+        room_name = random.choice(room_names_pool) + f" #{random.randint(10, 99)}"
+        # Strictly handles 'public', 'private', or 'friends'
+        room_type = random.choice(["public", "private", "friends"])
+        room_status = random.choice(["active", "closed"])
+        room_member_count = random.randint(1, 10)
+        
+        room_row = {
+            "id": room_id,
+            "group_id": group_id,
+            "name": room_name,
+            "room_type": room_type,
+            "status": room_status,
+            "created_by": creator_id,
+            "created_at": now_str,
+            "member_count": room_member_count
+        }
+        
+        append_to_csv(ROOMS_CSV_PATH, [
+            "id", "group_id", "name", "room_type", "status", "created_by", "created_at", "member_count"
+        ], [
+            room_row["id"], room_row["group_id"], room_row["name"], room_row["room_type"],
+            room_row["status"], room_row["created_by"], room_row["created_at"], room_row["member_count"]
+        ])
+        
+        send_supabase_post("rooms", room_row)
+        if DATABASE_URL and HAS_PG:
+            insert_postgres_row(
+                "INSERT INTO app_group.rooms (id, group_id, name, room_type, status, created_by, created_at, member_count) VALUES (%s,%s,%s,%s,%s,%s,%s,%s)",
+                (room_id, group_id, room_name, room_type, room_status, creator_id, now_dt, room_member_count)
+            )
+            
+        if "rooms" not in group:
+            group["rooms"] = []
+        group["rooms"].append(room_id)
+        actions.append(f"ROOM GENERATED (5s periodic): '{room_name}' ({room_type}) in group {group_id[:8]}... status: {room_status}")
 
     # Bounded group lists
     if len(active_groups) > 10:
@@ -497,6 +648,8 @@ def main():
     disable_rls_if_possible()
     
     users = load_user_pool()
+    global active_groups
+    active_groups = load_group_pool()
     
     if DATABASE_URL:
         if HAS_PG:

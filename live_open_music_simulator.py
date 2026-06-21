@@ -676,12 +676,15 @@ def simulate_step(users):
         actions.append(f"LISTENER LEFT: User {ended_session['user_id'][:8]}... left session on channel {ended_session['channel_id'][:8]}...")
     elif random.random() < 0.30:
         session_id = str(uuid.uuid4())
+        duration_mins = random.randint(5, 240)
+        left_dt = now_dt + datetime.timedelta(minutes=duration_mins)
+        left_str = left_dt.strftime("%Y-%m-%d %H:%M:%S")
         session_row = {
             "id": session_id,
             "channel_id": channel["id"],
             "user_id": user_id,
             "joined_at": now_str,
-            "left_at": None
+            "left_at": left_str
         }
         append_to_csv(SESSIONS_CSV_PATH, ["id", "channel_id", "user_id", "joined_at", "left_at"], [
             session_row["id"], session_row["channel_id"], session_row["user_id"], session_row["joined_at"], session_row["left_at"]
@@ -690,7 +693,7 @@ def simulate_step(users):
         if DATABASE_URL and HAS_PG:
             insert_postgres_row(
                 "INSERT INTO app_open.music_listener_sessions (id, channel_id, user_id, joined_at, left_at) VALUES (%s,%s,%s,%s,%s)",
-                (session_id, channel["id"], user_id, now_dt, None)
+                (session_id, channel["id"], user_id, now_dt, left_dt)
             )
             insert_postgres_row(
                 "UPDATE app_open.music_channels SET current_listeners = current_listeners + 1 WHERE id = %s",
