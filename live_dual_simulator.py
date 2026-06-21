@@ -45,7 +45,7 @@ DATABASE_URL = os.environ.get("DATABASE_URL")
 if not SUPABASE_URL:
     SUPABASE_URL = "https://ehhludmyveoixzknqwnt.supabase.co"
 if not SUPABASE_KEY:
-    SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVoaGx1ZG15dmVvaXh6a25xd250Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODE1NjIyOTQsImV4cCI6MjA5NzEzODI5NH0.2zVm9zF1CA9SDwUvTUiXSE4fiN5adqFL4Sg29a6W1TE"
+    SUPABASE_KEY = "sb_publishable_ODOA-yehp7PShmNy1J5YhA_gtP2EiMD"
 
 # Seed data pools
 room_names = [
