@@ -7,6 +7,7 @@ import datetime
 import csv
 import urllib.request
 import json
+import db_helpers
 
 # Ensure UTF-8 output on Windows terminal to prevent UnicodeEncodeError with emojis
 if sys.platform.startswith('win'):
@@ -251,7 +252,10 @@ def simulate_step(groups, users, group_rooms):
 
     # 2. Action: Queue a new track in a group (40% chance)
     if random.random() < 0.40 and groups:
-        group_id = random.choice(groups)
+        groups_with_rooms = [g for g in groups if group_rooms.get(g)]
+        if not groups_with_rooms:
+            return actions
+        group_id = random.choice(groups_with_rooms)
         added_by = random.choice(users)
         track_id = random.choice(popular_tracks)
         
@@ -265,34 +269,34 @@ def simulate_step(groups, users, group_rooms):
         status = "queued"
         
         # Get room_id (never NULL)
-        room_ids = group_rooms.get(group_id, [])
-        if not room_ids:
-            room_id = str(uuid.uuid4()) # Fallback ID
-        else:
-            room_id = random.choice(room_ids)
+        room_ids = group_rooms[group_id]
+        room_id = random.choice(room_ids)
 
+        track_col = db_helpers.DETECTED_COLUMNS.get("group_playlist_tracks_group_column", "group_id")
         track_row = {
             "id": track_row_id,
-            "group_id": group_id,
             "track_id": track_id,
             "added_by": added_by,
             "play_order": play_order,
             "status": status,
-            "added_at": now_str,
-            "room_id": room_id
+            "added_at": now_str
         }
+        if track_col == "room_id":
+            track_row["room_id"] = room_id
+        else:
+            track_row["group_id"] = room_id
         
         append_to_csv(TRACKS_CSV_PATH, [
-            "id", "group_id", "track_id", "added_by", "play_order", "status", "added_at", "room_id"
+            "id", track_col, "track_id", "added_by", "play_order", "status", "added_at"
         ], [
-            track_row["id"], track_row["group_id"], track_row["track_id"], track_row["added_by"],
-            track_row["play_order"], track_row["status"], track_row["added_at"], track_row["room_id"]
+            track_row["id"], track_row[track_col], track_row["track_id"], track_row["added_by"],
+            track_row["play_order"], track_row["status"], track_row["added_at"]
         ])
         send_supabase_post("group_playlist_tracks", track_row)
         if DATABASE_URL and HAS_PG:
             insert_postgres_row(
-                "INSERT INTO app_group.group_playlist_tracks (id, group_id, track_id, added_by, play_order, status, added_at, room_id) VALUES (%s,%s,%s,%s,%s,%s,%s,%s)",
-                (track_row_id, group_id, track_id, added_by, play_order, status, now_dt, room_id)
+                f"INSERT INTO app_group.group_playlist_tracks (id, {track_col}, track_id, added_by, play_order, status, added_at) VALUES (%s,%s,%s,%s,%s,%s,%s)",
+                (track_row_id, room_id, track_id, added_by, play_order, status, now_dt)
             )
             
         active_tracks.append({
@@ -346,6 +350,7 @@ def main():
     try:
         while True:
             tick += 1
+            db_helpers.refresh_all_caches(tick)
             now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             
             # Reload groups/users periodically to check if groups simulator added any

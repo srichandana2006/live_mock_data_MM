@@ -7,6 +7,8 @@ import datetime
 import csv
 import urllib.request
 import json
+import db_helpers
+
 
 # Ensure UTF-8 output on Windows terminal to prevent UnicodeEncodeError with emojis
 if sys.platform.startswith('win'):
@@ -249,207 +251,221 @@ def simulate_step(users):
             "created_at": now_str,
             "created_by": creator_id,
             "ended_at": ended_str,
-            "max_participants": max_p,
             "music_track": track_id
         }
         
         append_to_csv(ROOMS_CSV_PATH, [
-            "id", "room_code", "room_name", "room_type", "status", "created_at", "created_by", "ended_at", "max_participants", "music_track"
+            "id", "room_code", "room_name", "room_type", "status", "created_at", "created_by", "ended_at", "music_track"
         ], [
             room_row["id"], room_row["room_code"], room_row["room_name"], room_row["room_type"], room_row["status"],
-            room_row["created_at"], room_row["created_by"], room_row["ended_at"], room_row["max_participants"], room_row["music_track"]
+            room_row["created_at"], room_row["created_by"], room_row["ended_at"], room_row["music_track"]
         ])
-        send_supabase_post("dual_rooms", room_row)
+        room_supabase_success = send_supabase_post("dual_rooms", room_row)
+        room_pg_success = True
         if DATABASE_URL and HAS_PG:
-            insert_postgres_row(
-                "INSERT INTO app_dual.dual_rooms (id, room_code, room_name, room_type, status, created_at, created_by, ended_at, max_participants, music_track) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
-                (room_id, room_code, room_name, room_type, "ended", now_dt, creator_id, ended_dt, max_p, track_id)
+            room_pg_success = insert_postgres_row(
+                "INSERT INTO app_dual.dual_rooms (id, room_code, room_name, room_type, status, created_at, created_by, ended_at, music_track) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+                (room_id, room_code, room_name, room_type, "ended", now_dt, creator_id, ended_dt, track_id)
             )
             
-        # dual_participants (Creator / Host)
-        p1_dur = random.randint(5, 240)
-        p1_left_dt = now_dt + datetime.timedelta(minutes=p1_dur)
-        p1_left_str = p1_left_dt.strftime("%Y-%m-%d %H:%M:%S")
-        
-        p1_id = str(uuid.uuid4())
-        p1_row = {
-            "id": p1_id,
-            "room_id": room_id,
-            "user_id": creator_id,
-            "joined_at": now_str,
-            "left_at": p1_left_str,
-            "is_host": True,
-            "device_type": random.choice(["mobile", "web", "desktop"])
-        }
-        append_to_csv(PARTICIPANTS_CSV_PATH, [
-            "id", "room_id", "user_id", "joined_at", "left_at", "is_host", "device_type"
-        ], [
-            p1_row["id"], p1_row["room_id"], p1_row["user_id"], p1_row["joined_at"], p1_row["left_at"], p1_row["is_host"], p1_row["device_type"]
-        ])
-        send_supabase_post("dual_participants", p1_row)
-        if DATABASE_URL and HAS_PG:
-            insert_postgres_row(
-                "INSERT INTO app_dual.dual_participants (id, room_id, user_id, joined_at, left_at, is_host, device_type) VALUES (%s,%s,%s,%s,%s,%s,%s)",
-                (p1_id, room_id, creator_id, now_dt, p1_left_dt, True, p1_row["device_type"])
-            )
- 
-        # dual_participants (Partner / Guest)
-        p2_dur = random.randint(5, 240)
-        p2_left_dt = now_dt + datetime.timedelta(minutes=p2_dur)
-        p2_left_str = p2_left_dt.strftime("%Y-%m-%d %H:%M:%S")
-        
-        p2_id = str(uuid.uuid4())
-        p2_row = {
-            "id": p2_id,
-            "room_id": room_id,
-            "user_id": partner_id,
-            "joined_at": now_str,
-            "left_at": p2_left_str,
-            "is_host": False,
-            "device_type": random.choice(["mobile", "web", "desktop"])
-        }
-        append_to_csv(PARTICIPANTS_CSV_PATH, [
-            "id", "room_id", "user_id", "joined_at", "left_at", "is_host", "device_type"
-        ], [
-            p2_row["id"], p2_row["room_id"], p2_row["user_id"], p2_row["joined_at"], p2_row["left_at"], p2_row["is_host"], p2_row["device_type"]
-        ])
-        send_supabase_post("dual_participants", p2_row)
-        if DATABASE_URL and HAS_PG:
-            insert_postgres_row(
-                "INSERT INTO app_dual.dual_participants (id, room_id, user_id, joined_at, left_at, is_host, device_type) VALUES (%s,%s,%s,%s,%s,%s,%s)",
-                (p2_id, room_id, partner_id, now_dt, p2_left_dt, False, p2_row["device_type"])
-            )
- 
-        # Cache active room mapping
-        active_rooms.append({
-            "id": room_id,
-            "creator": creator_id,
-            "partner": partner_id,
-            "participants": [creator_id, partner_id]
-        })
-        actions.append(f"ROOM CREATED: '{room_name}' ({room_code}) | Matched users {creator_id[:8]}... & {partner_id[:8]}...")
- 
-    # Ensure we have active rooms to continue other operations
+        if room_supabase_success and room_pg_success:
+            # dual_participants (Creator / Host)
+            p1_dur = random.randint(5, 240)
+            p1_left_dt = now_dt + datetime.timedelta(minutes=p1_dur)
+            p1_left_str = p1_left_dt.strftime("%Y-%m-%d %H:%M:%S")
+            
+            p1_id = str(uuid.uuid4())
+            p1_row = {
+                "id": p1_id,
+                "room_id": room_id,
+                "user_id": creator_id,
+                "joined_at": now_str,
+                "left_at": p1_left_str,
+                "is_host": True,
+                "device_type": random.choice(["mobile", "web", "desktop"])
+            }
+            append_to_csv(PARTICIPANTS_CSV_PATH, [
+                "id", "room_id", "user_id", "joined_at", "left_at", "is_host", "device_type"
+            ], [
+                p1_row["id"], p1_row["room_id"], p1_row["user_id"], p1_row["joined_at"], p1_row["left_at"], p1_row["is_host"], p1_row["device_type"]
+            ])
+            send_supabase_post("dual_participants", p1_row)
+            if DATABASE_URL and HAS_PG:
+                insert_postgres_row(
+                    "INSERT INTO app_dual.dual_participants (id, room_id, user_id, joined_at, left_at, is_host, device_type) VALUES (%s,%s,%s,%s,%s,%s,%s)",
+                    (p1_id, room_id, creator_id, now_dt, p1_left_dt, True, p1_row["device_type"])
+                )
+     
+            # dual_participants (Partner / Guest)
+            p2_dur = random.randint(5, 240)
+            p2_left_dt = now_dt + datetime.timedelta(minutes=p2_dur)
+            p2_left_str = p2_left_dt.strftime("%Y-%m-%d %H:%M:%S")
+            
+            p2_id = str(uuid.uuid4())
+            p2_row = {
+                "id": p2_id,
+                "room_id": room_id,
+                "user_id": partner_id,
+                "joined_at": now_str,
+                "left_at": p2_left_str,
+                "is_host": False,
+                "device_type": random.choice(["mobile", "web", "desktop"])
+            }
+            append_to_csv(PARTICIPANTS_CSV_PATH, [
+                "id", "room_id", "user_id", "joined_at", "left_at", "is_host", "device_type"
+            ], [
+                p2_row["id"], p2_row["room_id"], p2_row["user_id"], p2_row["joined_at"], p2_row["left_at"], p2_row["is_host"], p2_row["device_type"]
+            ])
+            send_supabase_post("dual_participants", p2_row)
+            if DATABASE_URL and HAS_PG:
+                insert_postgres_row(
+                    "INSERT INTO app_dual.dual_participants (id, room_id, user_id, joined_at, left_at, is_host, device_type) VALUES (%s,%s,%s,%s,%s,%s,%s)",
+                    (p2_id, room_id, partner_id, now_dt, p2_left_dt, False, p2_row["device_type"])
+                )
+     
+            # Cache active room mapping
+            active_rooms.append({
+                "id": room_id,
+                "creator": creator_id,
+                "partner": partner_id,
+                "participants": [creator_id, partner_id]
+            })
+            actions.append(f"ROOM CREATED: '{room_name}' ({room_code}) | Matched users {creator_id[:8]}... & {partner_id[:8]}...")
+        else:
+            print(f"[ERROR] Failed to create dual_rooms {room_id}", file=sys.stderr)
     if active_rooms:
         room = random.choice(active_rooms)
         room_id = room["id"]
         
+        # Verify room exists in database before proceeding with child events
+        existing_rooms = {r["id"] for r in db_helpers.ROOMS}.union({r["id"] for r in active_rooms})
+        
         # 2. Action: Chat Message in Room (40% chance)
         if random.random() < 0.40:
-            msg_id = str(uuid.uuid4())
-            sender_uuid = random.choice(room["participants"])
-            receiver_uuid = room["partner"] if sender_uuid == room["creator"] else room["creator"]
-            sender_id_bigint = to_bigint(sender_uuid)
-            receiver_id_bigint = to_bigint(receiver_uuid)
-            msg_text = random.choice(messages_pool)
-            msg_type = random.choice(["text", "emoji", "image", "gif", "audio", "sticker"])
-            edited = random.random() < 0.15
-            created_dt = now_dt
-            if edited:
-                edited_dt = created_dt + datetime.timedelta(minutes=random.randint(1, 60))
+            if room_id not in existing_rooms:
+                print(f"[WARNING] Skipping message insertion: Parent room {room_id} does not exist in Supabase.", file=sys.stderr)
             else:
-                edited_dt = created_dt
-            
-            created_str = created_dt.strftime("%Y-%m-%d %H:%M:%S")
-            edited_str = edited_dt.strftime("%Y-%m-%d %H:%M:%S")
-            
-            message_row = {
-                "id": msg_id,
-                "room_id": room_id,
-                "sender_id": sender_id_bigint,
-                "receiver_id": receiver_id_bigint,
-                "message": msg_text,
-                "message_type": msg_type,
-                "sent_at": created_str,
-                "edited": edited,
-                "edited_at": edited_str
-            }
-            append_to_csv(MESSAGES_CSV_PATH, [
-                "id", "room_id", "sender_id", "receiver_id", "message", "message_type", "sent_at", "edited", "edited_at"
-            ], [
-                message_row["id"], message_row["room_id"], message_row["sender_id"], message_row["receiver_id"],
-                message_row["message"], message_row["message_type"], message_row["sent_at"], message_row["edited"], message_row["edited_at"]
-            ])
-            send_supabase_post("dual_messages", message_row)
-            if DATABASE_URL and HAS_PG:
-                insert_postgres_row(
-                    "INSERT INTO app_dual.dual_messages (id, room_id, sender_id, receiver_id, message, message_type, sent_at, edited, edited_at) VALUES (%s,%s,%s,%s,%s,%s::app_dual.message_type_enum,%s,%s,%s)",
-                    (msg_id, room_id, sender_id_bigint, receiver_id_bigint, msg_text, msg_type, created_dt, edited, edited_dt)
-                )
-            actions.append(f"MESSAGE sent by {sender_uuid[:8]}... to {receiver_uuid[:8]}... inside Room {room_id[:8]}... ('{msg_text[:15]}')")
+                msg_id = str(uuid.uuid4())
+                sender_uuid = random.choice(room["participants"])
+                receiver_uuid = room["partner"] if sender_uuid == room["creator"] else room["creator"]
+                sender_id_bigint = to_bigint(sender_uuid)
+                receiver_id_bigint = to_bigint(receiver_uuid)
+                msg_text = random.choice(messages_pool)
+                msg_type = random.choice(["text", "emoji", "image", "gif", "audio", "sticker"])
+                edited = random.random() < 0.15
+                created_dt = now_dt
+                if edited:
+                    edited_dt = created_dt + datetime.timedelta(minutes=random.randint(1, 60))
+                else:
+                    edited_dt = created_dt
+                
+                created_str = created_dt.strftime("%Y-%m-%d %H:%M:%S")
+                edited_str = edited_dt.strftime("%Y-%m-%d %H:%M:%S")
+                
+                sender_col = db_helpers.DETECTED_COLUMNS.get("dual_messages_sender_column", "sender_user_id")
+                message_row = {
+                    "id": msg_id,
+                    "room_id": room_id,
+                    sender_col: sender_id_bigint,
+                    "receiver_id": receiver_id_bigint,
+                    "message": msg_text,
+                    "message_type": msg_type,
+                    "sent_at": created_str,
+                    "edited": edited,
+                    "edited_at": edited_str
+                }
+                append_to_csv(MESSAGES_CSV_PATH, [
+                    "id", "room_id", sender_col, "receiver_id", "message", "message_type", "sent_at", "edited", "edited_at"
+                ], [
+                    message_row["id"], message_row["room_id"], message_row[sender_col], message_row["receiver_id"],
+                    message_row["message"], message_row["message_type"], message_row["sent_at"], message_row["edited"], message_row["edited_at"]
+                ])
+                send_supabase_post("dual_messages", message_row)
+                if DATABASE_URL and HAS_PG:
+                    insert_postgres_row(
+                        f"INSERT INTO app_dual.dual_messages (id, room_id, {sender_col}, receiver_id, message, message_type, sent_at, edited, edited_at) VALUES (%s,%s,%s,%s,%s,%s::app_dual.message_type_enum,%s,%s,%s)",
+                        (msg_id, room_id, sender_id_bigint, receiver_id_bigint, msg_text, msg_type, created_dt, edited, edited_dt)
+                    )
+                actions.append(f"MESSAGE sent by {sender_uuid[:8]}... to {receiver_uuid[:8]}... inside Room {room_id[:8]}... ('{msg_text[:15]}')")
  
         # 3. Action: Call Activity (20% chance)
         if random.random() < 0.20:
-            call_id = str(uuid.uuid4())
-            call_type = random.choice(["audio", "video"])
-            duration = random.randint(30, 7200)
-            started_dt = now_dt
-            ended_dt = started_dt + datetime.timedelta(seconds=duration)
-            started_str = started_dt.strftime("%Y-%m-%d %H:%M:%S")
-            ended_str = ended_dt.strftime("%Y-%m-%d %H:%M:%S")
-            
-            caller_id = room["creator"]
-            receiver_id = room["partner"]
-            
-            call_row = {
-                "id": call_id,
-                "room_id": room_id,
-                "call_type": call_type,
-                "started_at": started_str,
-                "ended_at": ended_str,
-                "call_status": "completed",
-                "duration_seconds": duration,
-                "caller_id": caller_id,
-                "receiver_id": receiver_id
-            }
-            append_to_csv(CALLS_CSV_PATH, [
-                "id", "room_id", "call_type", "started_at", "ended_at", "call_status", "duration_seconds", "caller_id", "receiver_id"
-            ], [
-                call_row["id"], call_row["room_id"], call_row["call_type"], call_row["started_at"], call_row["ended_at"],
-                call_row["call_status"], call_row["duration_seconds"], call_row["caller_id"], call_row["receiver_id"]
-            ])
-            send_supabase_post("dual_calls", call_row)
-            if DATABASE_URL and HAS_PG:
-                insert_postgres_row(
-                    "INSERT INTO app_dual.dual_calls (id, room_id, call_type, started_at, ended_at, call_status, duration_seconds, caller_id, receiver_id) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)",
-                    (call_id, room_id, call_type, started_dt, ended_dt, "completed", duration, caller_id, receiver_id)
-                )
-            actions.append(f"CALL COMPLETED inside Room {room_id[:8]}... | Caller: {caller_id[:8]}... | Receiver: {receiver_id[:8]}... | Duration: {duration}s")
-
+            if room_id not in existing_rooms:
+                print(f"[WARNING] Skipping call connection: Parent room {room_id} does not exist in Supabase.", file=sys.stderr)
+            else:
+                call_id = str(uuid.uuid4())
+                call_type = random.choice(["audio", "video"])
+                duration = random.randint(30, 7200)
+                started_dt = now_dt
+                ended_dt = started_dt + datetime.timedelta(seconds=duration)
+                started_str = started_dt.strftime("%Y-%m-%d %H:%M:%S")
+                ended_str = ended_dt.strftime("%Y-%m-%d %H:%M:%S")
+                
+                caller_id = room["creator"]
+                receiver_id = room["partner"]
+                
+                call_row = {
+                    "id": call_id,
+                    "room_id": room_id,
+                    "call_type": call_type,
+                    "started_at": started_str,
+                    "ended_at": ended_str,
+                    "call_status": "completed",
+                    "duration_seconds": duration,
+                    "caller_id": caller_id,
+                    "receiver_id": receiver_id
+                }
+                append_to_csv(CALLS_CSV_PATH, [
+                    "id", "room_id", "call_type", "started_at", "ended_at", "call_status", "duration_seconds", "caller_id", "receiver_id"
+                ], [
+                    call_row["id"], call_row["room_id"], call_row["call_type"], call_row["started_at"], call_row["ended_at"],
+                    call_row["call_status"], call_row["duration_seconds"], call_row["caller_id"], call_row["receiver_id"]
+                ])
+                send_supabase_post("dual_calls", call_row)
+                if DATABASE_URL and HAS_PG:
+                    insert_postgres_row(
+                        "INSERT INTO app_dual.dual_calls (id, room_id, call_type, started_at, ended_at, call_status, duration_seconds, caller_id, receiver_id) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+                        (call_id, room_id, call_type, started_dt, ended_dt, "completed", duration, caller_id, receiver_id)
+                    )
+                actions.append(f"CALL COMPLETED inside Room {room_id[:8]}... | Caller: {caller_id[:8]}... | Receiver: {receiver_id[:8]}... | Duration: {duration}s")
+ 
         # 4. Action: Song Request (25% chance)
         if random.random() < 0.25:
-            req_id = str(uuid.uuid4())
-            req_by = random.choice(room["participants"])
-            song = random.choice(songs_pool)
-            
-            status_choices = ["pending", "approved", "playing", "completed", "rejected", "cancelled"]
-            status_weights = [0.20, 0.20, 0.10, 0.35, 0.10, 0.05]
-            status = random.choices(status_choices, weights=status_weights)[0]
-            played_at = now_str if status == "completed" else None
-            
-            song_row = {
-                "id": req_id,
-                "room_id": room_id,
-                "requested_by": req_by,
-                "song_name": song[0],
-                "artist_name": song[1],
-                "requested_at": now_str,
-                "request_status": status,
-                "played_at": played_at
-            }
-            append_to_csv(SONGS_CSV_PATH, [
-                "id", "room_id", "requested_by", "song_name", "artist_name", "requested_at", "request_status", "played_at"
-            ], [
-                song_row["id"], song_row["room_id"], song_row["requested_by"], song_row["song_name"], song_row["artist_name"],
-                song_row["requested_at"], song_row["request_status"], song_row["played_at"]
-            ])
-            send_supabase_post("dual_song_requests", song_row)
-            if DATABASE_URL and HAS_PG:
-                insert_postgres_row(
-                    "INSERT INTO app_dual.dual_song_requests (id, room_id, requested_by, song_name, artist_name, requested_at, request_status, played_at) VALUES (%s,%s,%s,%s,%s,%s,%s::app_dual.request_status_enum,%s)",
-                    (req_id, room_id, req_by, song[0], song[1], now_dt, status, now_dt if played_at else None)
-                )
-            actions.append(f"SONG REQUEST: '{song[0]}' by {song[1]} inside Room {room_id[:8]}... (Status: {status})")
+            if room_id not in existing_rooms:
+                print(f"[WARNING] Skipping song request: Parent room {room_id} does not exist in Supabase.", file=sys.stderr)
+            else:
+                req_id = str(uuid.uuid4())
+                req_by = random.choice(room["participants"])
+                song = random.choice(songs_pool)
+                
+                status_choices = ["pending", "approved", "playing", "completed", "rejected", "cancelled"]
+                status_weights = [0.20, 0.20, 0.10, 0.35, 0.10, 0.05]
+                status = random.choices(status_choices, weights=status_weights)[0]
+                played_at = now_str if status == "completed" else None
+                
+                song_row = {
+                    "id": req_id,
+                    "room_id": room_id,
+                    "requested_by": req_by,
+                    "song_name": song[0],
+                    "artist_name": song[1],
+                    "requested_at": now_str,
+                    "request_status": status,
+                    "played_at": played_at
+                }
+                append_to_csv(SONGS_CSV_PATH, [
+                    "id", "room_id", "requested_by", "song_name", "artist_name", "requested_at", "request_status", "played_at"
+                ], [
+                    song_row["id"], song_row["room_id"], song_row["requested_by"], song_row["song_name"], song_row["artist_name"],
+                    song_row["requested_at"], song_row["request_status"], song_row["played_at"]
+                ])
+                send_supabase_post("dual_song_requests", song_row)
+                if DATABASE_URL and HAS_PG:
+                    insert_postgres_row(
+                        "INSERT INTO app_dual.dual_song_requests (id, room_id, requested_by, song_name, artist_name, requested_at, request_status, played_at) VALUES (%s,%s,%s,%s,%s,%s,%s::app_dual.request_status_enum,%s)",
+                        (req_id, room_id, req_by, song[0], song[1], now_dt, status, now_dt if played_at else None)
+                    )
+                actions.append(f"SONG REQUEST: '{song[0]}' by {song[1]} inside Room {room_id[:8]}... (Status: {status})")
 
     # 5. Action: New Match between Users (20% chance)
     if random.random() < 0.20:
@@ -531,6 +547,7 @@ def main():
     try:
         while True:
             tick += 1
+            db_helpers.refresh_all_caches(tick)
             now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             
             actions = simulate_step(users)

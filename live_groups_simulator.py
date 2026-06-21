@@ -7,6 +7,8 @@ import datetime
 import csv
 import urllib.request
 import json
+import db_helpers
+
 
 # Ensure UTF-8 output on Windows terminal to prevent UnicodeEncodeError with emojis
 if sys.platform.startswith('win'):
@@ -212,6 +214,51 @@ def load_group_pool():
             
     return groups
 
+def load_group_rooms():
+    """Load existing rooms and map them to their group_id"""
+    group_rooms = {}
+    if SUPABASE_URL and SUPABASE_KEY:
+        url = f"{SUPABASE_URL.rstrip('/')}/rest/v1/rooms?select=id,group_id"
+        headers = {
+            "apikey": SUPABASE_KEY,
+            "Authorization": f"Bearer {SUPABASE_KEY}",
+            "Accept-Profile": "app_group"
+        }
+        try:
+            req = urllib.request.Request(url, headers=headers)
+            with urllib.request.urlopen(req, timeout=5) as response:
+                data = json.loads(response.read().decode())
+                for r in data:
+                    gid = r.get("group_id")
+                    rid = r.get("id")
+                    if gid and rid:
+                        if gid not in group_rooms:
+                            group_rooms[gid] = []
+                        group_rooms[gid].append(rid)
+                if group_rooms:
+                    print(f"Loaded {sum(len(v) for v in group_rooms.values())} rooms from Supabase API.")
+                    return group_rooms
+        except Exception as e:
+            print(f"Warning: Could not fetch rooms from Supabase: {e}", file=sys.stderr)
+
+    ROOMS_CSV_PATH = os.path.join(WORKSPACE_DIR, "rooms_mock_data.csv")
+    if os.path.exists(ROOMS_CSV_PATH):
+        try:
+            with open(ROOMS_CSV_PATH, "r", newline="", encoding="utf-8") as f:
+                reader = csv.DictReader(f)
+                for r in reader:
+                    gid = r.get("group_id")
+                    rid = r.get("id")
+                    if gid and rid:
+                        if gid not in group_rooms:
+                            group_rooms[gid] = []
+                        group_rooms[gid].append(rid)
+        except Exception as e:
+            print(f"Warning: Could not parse rooms CSV: {e}", file=sys.stderr)
+            
+    return group_rooms
+
+
 # Helper to write rows to local CSV files
 def append_to_csv(filepath, headers, data):
     file_exists = os.path.exists(filepath)
@@ -387,9 +434,6 @@ def simulate_step(users):
     if active_groups:
         group = random.choice(active_groups)
         group_id = group["id"]
-        # Ensure rooms exist in group dictionary (fallback in case it wasn't created)
-        if "rooms" not in group or not group["rooms"]:
-            group["rooms"] = [str(uuid.uuid4())]
 
         # 2. Action: Add a Member to a Group (25% chance)
         if random.random() < 0.25:
@@ -433,34 +477,37 @@ def simulate_step(users):
                 actions.append(f"MEMBER ADDED: User {user_id[:8]}... joined group {group_id[:8]}... as '{role}'")
 
         # 3. Action: Send Group Chat Message (40% chance)
-        if random.random() < 0.40 and group["members"]:
+        if random.random() < 0.40 and group["members"] and group.get("rooms"):
             sender_id = random.choice(group["members"])
             msg_text = random.choice(message_templates)
             msg_id = str(uuid.uuid4())
             read_count = random.randint(1, len(group["members"]))
             room_id = random.choice(group["rooms"])
             
+            group_col = db_helpers.DETECTED_COLUMNS.get("group_messages_group_column", "group_id")
             message_row = {
                 "id": msg_id,
-                "group_id": group_id,
                 "user_id": sender_id,
                 "message": msg_text,
                 "read_count": read_count,
-                "sent_at": now_str,
-                "room_id": room_id
+                "sent_at": now_str
             }
+            if group_col == "room_id":
+                message_row["room_id"] = room_id
+            else:
+                message_row["group_id"] = room_id
             
             append_to_csv(MESSAGES_CSV_PATH, [
-                "id", "group_id", "user_id", "message", "read_count", "sent_at", "room_id"
+                "id", group_col, "user_id", "message", "read_count", "sent_at"
             ], [
-                message_row["id"], message_row["group_id"], message_row["user_id"], message_row["message"],
-                message_row["read_count"], message_row["sent_at"], message_row["room_id"]
+                message_row["id"], message_row[group_col], message_row["user_id"], message_row["message"],
+                message_row["read_count"], message_row["sent_at"]
             ])
             send_supabase_post("group_messages", message_row)
             if DATABASE_URL and HAS_PG:
                 insert_postgres_row(
-                    "INSERT INTO app_group.group_messages (id, group_id, user_id, message, read_count, sent_at, room_id) VALUES (%s,%s,%s,%s,%s,%s,%s)",
-                    (msg_id, group_id, sender_id, msg_text, read_count, now_dt, room_id)
+                    f"INSERT INTO app_group.group_messages (id, {group_col}, user_id, message, read_count, sent_at) VALUES (%s,%s,%s,%s,%s,%s)",
+                    (msg_id, room_id, sender_id, msg_text, read_count, now_dt)
                 )
             actions.append(f"MESSAGE inside group {group_id[:8]}... room {room_id[:8]}... by {sender_id[:8]}... ('{msg_text[:15]}')")
 
@@ -528,47 +575,50 @@ def simulate_step(users):
 
         # 5. Action: Create Announcements / Summons (20% chance)
         if random.random() < 0.20:
-            ann_id = str(uuid.uuid4())
-            creator_id = random.choice(group["members"])
-            ann_type = random.choice(["summon", "broadcast", "event"])
-            title = random.choice(ann_titles_if_needed(ann_type))
-            content = random.choice(ann_contents_if_needed(ann_type))
-            room_id = random.choice(group["rooms"])
-            
-            targets = None
-            targets_csv = ""
-            if ann_type == "summon":
-                # Select random target users from pool
-                target_count = min(3, len(users) - 1)
-                selected_targets = random.sample([u for u in users if u != creator_id], target_count)
-                targets = selected_targets
-                targets_csv = "{" + ",".join(selected_targets) + "}" # Postgres array format
+            if not db_helpers.ROOMS:
+                print("[WARNING] Skipping announcement creation: No active dual_rooms found in Supabase cache.", file=sys.stderr)
+            else:
+                ann_id = str(uuid.uuid4())
+                creator_id = random.choice(group["members"])
+                ann_type = random.choice(["summon", "broadcast", "event"])
+                title = random.choice(ann_titles_if_needed(ann_type))
+                content = random.choice(ann_contents_if_needed(ann_type))
+                room_id = random.choice(db_helpers.ROOMS)["id"]
                 
-            ann_row = {
-                "id": ann_id,
-                "group_id": group_id,
-                "created_by": creator_id,
-                "target_user_ids": targets,
-                "announcement_type": ann_type,
-                "title": title,
-                "content": content,
-                "created_at": now_str,
-                "room_id": room_id
-            }
-            
-            append_to_csv(ANNOUNCEMENTS_CSV_PATH, [
-                "id", "group_id", "created_by", "target_user_ids", "announcement_type", "title", "content", "created_at", "room_id"
-            ], [
-                ann_row["id"], ann_row["group_id"], ann_row["created_by"], targets_csv, ann_row["announcement_type"],
-                ann_row["title"], ann_row["content"], ann_row["created_at"], ann_row["room_id"]
-            ])
-            send_supabase_post("announcements", ann_row)
-            if DATABASE_URL and HAS_PG:
-                insert_postgres_row(
-                    "INSERT INTO app_group.announcements (id, group_id, created_by, target_user_ids, announcement_type, title, content, created_at, room_id) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)",
-                    (ann_id, group_id, creator_id, targets, ann_type, title, content, now_dt, room_id)
-                )
-            actions.append(f"ANNOUNCEMENT: '{title}' ({ann_type}) broadcasted in group {group_id[:8]}... room {room_id[:8]}...")
+                targets = None
+                targets_csv = ""
+                if ann_type == "summon":
+                    # Select random target users from pool
+                    target_count = min(3, len(users) - 1)
+                    selected_targets = random.sample([u for u in users if u != creator_id], target_count)
+                    targets = selected_targets
+                    targets_csv = "{" + ",".join(selected_targets) + "}" # Postgres array format
+                    
+                ann_row = {
+                    "id": ann_id,
+                    "group_id": group_id,
+                    "created_by": creator_id,
+                    "target_user_ids": targets,
+                    "announcement_type": ann_type,
+                    "title": title,
+                    "content": content,
+                    "created_at": now_str,
+                    "room_id": room_id
+                }
+                
+                append_to_csv(ANNOUNCEMENTS_CSV_PATH, [
+                    "id", "group_id", "created_by", "target_user_ids", "announcement_type", "title", "content", "created_at", "room_id"
+                ], [
+                    ann_row["id"], ann_row["group_id"], ann_row["created_by"], targets_csv, ann_row["announcement_type"],
+                    ann_row["title"], ann_row["content"], ann_row["created_at"], ann_row["room_id"]
+                ])
+                send_supabase_post("announcements", ann_row)
+                if DATABASE_URL and HAS_PG:
+                    insert_postgres_row(
+                        "INSERT INTO app_group.announcements (id, group_id, created_by, target_user_ids, announcement_type, title, content, created_at, room_id) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+                        (ann_id, group_id, creator_id, targets, ann_type, title, content, now_dt, room_id)
+                    )
+                actions.append(f"ANNOUNCEMENT: '{title}' ({ann_type}) broadcasted in group {group_id[:8]}... room {room_id[:8]}...")
 
     # 6. Action: Generate a room (100% chance, every tick / 5 seconds)
     if active_groups:
@@ -650,6 +700,9 @@ def main():
     users = load_user_pool()
     global active_groups
     active_groups = load_group_pool()
+    group_rooms = load_group_rooms()
+    for g in active_groups:
+        g["rooms"] = group_rooms.get(g["id"], [])
     
     if DATABASE_URL:
         if HAS_PG:
@@ -669,6 +722,7 @@ def main():
     try:
         while True:
             tick += 1
+            db_helpers.refresh_all_caches(tick)
             now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             
             actions = simulate_step(users)
