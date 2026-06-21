@@ -224,7 +224,13 @@ def insert_postgres_row(query, params):
         print(f"[PostgreSQL Error] query failed: {e}", file=sys.stderr)
         return False
 
-def simulate_step(groups, users, group_rooms):
+def simulate_step(group_rooms):
+    groups = [g["id"] for g in db_helpers.GROUPS]
+    users = [u["id"] for u in db_helpers.USERS]
+    if not groups or not users:
+        print("[WARNING] Skipping simulation step: No active groups or users in Supabase cache.", file=sys.stderr)
+        return []
+        
     now_dt = datetime.datetime.now()
     now_str = now_dt.strftime("%Y-%m-%d %H:%M:%S")
     actions = []
@@ -327,9 +333,7 @@ def main():
     print("        MELODYMEET TRACKS MODULE LIVE DATA SIMULATOR")
     print("=" * 60)
     
-    # Pre-load files
-    groups = load_groups()
-    users = load_users()
+    # Groups and users are dynamically resolved from db_helpers in simulate_step()
     group_rooms = load_group_rooms()
     
     if DATABASE_URL:
@@ -353,13 +357,11 @@ def main():
             db_helpers.refresh_all_caches(tick)
             now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             
-            # Reload groups/users periodically to check if groups simulator added any
+            # Reload group rooms periodically to check if groups simulator added any
             if tick % 5 == 0:
-                groups = load_groups()
-                users = load_users()
                 group_rooms = load_group_rooms()
                 
-            actions = simulate_step(groups, users, group_rooms)
+            actions = simulate_step(group_rooms)
             
             print(f"[{now_str}] Tick #{tick} | Simulated {len(actions)} event actions:")
             for action in actions:

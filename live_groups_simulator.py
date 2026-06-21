@@ -312,7 +312,12 @@ def insert_postgres_row(query, params):
         print(f"[PostgreSQL Error] query failed: {e}", file=sys.stderr)
         return False
 
-def simulate_step(users):
+def simulate_step():
+    users = [u["id"] for u in db_helpers.USERS]
+    if not users:
+        print("[WARNING] Skipping simulation step: No active users in Supabase cache.", file=sys.stderr)
+        return []
+        
     now_dt = datetime.datetime.now()
     now_str = now_dt.strftime("%Y-%m-%d %H:%M:%S")
     actions = []
@@ -698,7 +703,7 @@ def main():
     # Disable RLS on startup if direct database connection is active
     disable_rls_if_possible()
     
-    users = load_user_pool()
+    # Users are dynamically resolved from db_helpers.USERS in simulate_step()
     global active_groups
     active_groups = load_group_pool()
     group_rooms = load_group_rooms()
@@ -726,7 +731,7 @@ def main():
             db_helpers.refresh_all_caches(tick)
             now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             
-            actions = simulate_step(users)
+            actions = simulate_step()
             
             print(f"[{now_str}] Tick #{tick} | Simulated {len(actions)} event actions:")
             for action in actions:
