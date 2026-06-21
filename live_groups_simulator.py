@@ -575,15 +575,16 @@ def simulate_step(users):
 
         # 5. Action: Create Announcements / Summons (20% chance)
         if random.random() < 0.20:
-            if not db_helpers.ROOMS:
-                print("[WARNING] Skipping announcement creation: No active dual_rooms found in Supabase cache.", file=sys.stderr)
+            if not group.get("rooms"):
+                # Skip
+                pass
             else:
                 ann_id = str(uuid.uuid4())
                 creator_id = random.choice(group["members"])
                 ann_type = random.choice(["summon", "broadcast", "event"])
                 title = random.choice(ann_titles_if_needed(ann_type))
                 content = random.choice(ann_contents_if_needed(ann_type))
-                room_id = random.choice(db_helpers.ROOMS)["id"]
+                room_id = random.choice(group["rooms"])
                 
                 targets = None
                 targets_csv = ""
